@@ -164,6 +164,46 @@ func PluginDetailPage(p plugin.Descriptor) templ.Component {
 			return err
 		}
 
+		// Config
+		if _, err := io.WriteString(w, "<section class=\"card span-6\"><div style=\"display:flex;align-items:center;justify-content:space-between;gap:12px;\"><div><div class=\"h1\" style=\"font-size:18px;margin:0\">配置</div><div class=\"muted\" style=\"font-size:12px\">插件运行中可修改并立即生效</div></div>"); err != nil {
+			return err
+		}
+		if p.Config != nil {
+			if _, err := fmt.Fprintf(w, "<a class=\"btn primary\" href=\"/plugins/%s/config\">编辑</a>", templ.EscapeString(p.PluginID)); err != nil {
+				return err
+			}
+		} else {
+			if _, err := io.WriteString(w, "<span class=\"pill\">无</span>"); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(w, "</div>"); err != nil {
+			return err
+		}
+		if p.Config != nil {
+			ver := p.Config.Version
+			if ver == "" {
+				ver = "-"
+			}
+			if _, err := io.WriteString(w, "<div class=\"kvs\" style=\"margin-top:10px\">"); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "<div class=\"k\">版本</div><div><code>%s</code></div>", templ.EscapeString(ver)); err != nil {
+				return err
+			}
+			if p.Config.Description != "" {
+				if _, err := fmt.Fprintf(w, "<div class=\"k\">说明</div><div>%s</div>", templ.EscapeString(p.Config.Description)); err != nil {
+					return err
+				}
+			}
+			if _, err := io.WriteString(w, "</div>"); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(w, "</section>"); err != nil {
+			return err
+		}
+
 		// Commands
 		if _, err := io.WriteString(w, "<section class=\"card span-6\"><div style=\"display:flex;align-items:center;justify-content:space-between\"><div class=\"h1\" style=\"font-size:18px;margin:0\">命令</div>"); err != nil {
 			return err
@@ -222,6 +262,103 @@ func PluginDetailPage(p plugin.Descriptor) templ.Component {
 			}
 		}
 		if _, err := io.WriteString(w, "</section></div>"); err != nil {
+			return err
+		}
+		return nil
+	}))
+}
+
+func PluginConfigPage(p plugin.Descriptor, currentJSON string, fieldsHTML string, flashOK string, flashErr string) templ.Component {
+	return Layout("NyaNyaBot - Plugin Config", NavPlugins, templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		_ = ctx
+		if _, err := fmt.Fprintf(w, "<h1 class=\"h1\">配置：%s <span class=\"pill\"><code>%s</code></span></h1>", templ.EscapeString(p.Name), templ.EscapeString(p.PluginID)); err != nil {
+			return err
+		}
+		if p.Description != "" {
+			if _, err := fmt.Fprintf(w, "<p class=\"sub\">%s</p>", templ.EscapeString(p.Description)); err != nil {
+				return err
+			}
+		}
+		if flashOK != "" {
+			if _, err := fmt.Fprintf(w, "<div class=\"flash good\">%s</div>", templ.EscapeString(flashOK)); err != nil {
+				return err
+			}
+		}
+		if flashErr != "" {
+			if _, err := fmt.Fprintf(w, "<div class=\"flash bad\">%s</div>", templ.EscapeString(flashErr)); err != nil {
+				return err
+			}
+		}
+
+		if p.Config == nil {
+			if _, err := io.WriteString(w, "<div class=\"card\"><p class=\"muted\">该插件未声明可配置项（Descriptor.config 为空）。</p><a class=\"btn primary\" href=\"/plugins/\">返回</a></div>"); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		if _, err := io.WriteString(w, "<div class=\"grid\">"); err != nil {
+			return err
+		}
+
+		// Editor (schema-driven)
+		if _, err := io.WriteString(w, "<section class=\"card span-6\"><div class=\"h1\" style=\"font-size:18px;margin:0 0 10px 0\">编辑配置</div>"); err != nil {
+			return err
+		}
+		// Note: schema-driven form fields are injected by server as pre-rendered HTML rows.
+		// If schema parsing fails, server will fall back to JSON textarea.
+		if _, err := io.WriteString(w, "<form class=\"form\" method=\"post\" action=\"/plugins/"+templ.EscapeString(p.PluginID)+"/config\">"+
+			fieldsHTML+
+			"<div style=\"display:flex;gap:10px;align-items:center;flex-wrap:wrap\">"+
+			"<button class=\"btn primary\" type=\"submit\" name=\"action\" value=\"save\">保存并立即生效</button>"+
+			"<button class=\"btn\" type=\"submit\" name=\"action\" value=\"reset\">重置为默认</button>"+
+			"<a class=\"btn\" href=\"/plugins/"+templ.EscapeString(p.PluginID)+"\">返回详情</a>"+
+			"</div></form></section>"); err != nil {
+			return err
+		}
+
+		// Schema / Default
+		if _, err := io.WriteString(w, "<section class=\"card span-6\"><div class=\"h1\" style=\"font-size:18px;margin:0 0 10px 0\">配置规范</div>"); err != nil {
+			return err
+		}
+		ver := p.Config.Version
+		if ver == "" {
+			ver = "-"
+		}
+		if _, err := io.WriteString(w, "<div class=\"kvs\">"+
+			"<div class=\"k\">版本</div><div><code>"+templ.EscapeString(ver)+"</code></div>"); err != nil {
+			return err
+		}
+		if p.Config.Description != "" {
+			if _, err := fmt.Fprintf(w, "<div class=\"k\">说明</div><div>%s</div>", templ.EscapeString(p.Config.Description)); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(w, "</div>"); err != nil {
+			return err
+		}
+
+		schema := string(p.Config.Schema)
+		if schema == "" {
+			schema = "{}"
+		}
+		def := string(p.Config.Default)
+		if def == "" {
+			def = "{}"
+		}
+		if _, err := io.WriteString(w, "<div style=\"margin-top:12px\"><div class=\"muted\" style=\"margin-bottom:6px\">Schema</div>"+
+			"<pre class=\"pre\"><code>"+templ.EscapeString(schema)+"</code></pre></div>"); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, "<div style=\"margin-top:12px\"><div class=\"muted\" style=\"margin-bottom:6px\">Default</div>"+
+			"<pre class=\"pre\"><code>"+templ.EscapeString(def)+"</code></pre></div>"); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, "</section>"); err != nil {
+			return err
+		}
+
+		if _, err := io.WriteString(w, "</div>"); err != nil {
 			return err
 		}
 		return nil

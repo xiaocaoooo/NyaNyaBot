@@ -20,6 +20,10 @@ import (
 
 type DescribeReply = plugin.Descriptor
 
+type ConfigureArgs struct {
+	Config json.RawMessage `json:"config"`
+}
+
 type HandleArgs struct {
 	ListenerID   string          `json:"listener_id"`
 	EventRawJSON json.RawMessage `json:"event_raw_json"`

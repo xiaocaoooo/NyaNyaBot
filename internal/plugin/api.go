@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 )
@@ -13,6 +14,10 @@ import (
 // core first. It can be bridged to go-plugin later.
 type Plugin interface {
 	Descriptor(ctx context.Context) (Descriptor, error)
+	// Configure pushes plugin configuration from host to plugin.
+	// config is an arbitrary JSON object, typically stored in host config.
+	// Host should call this once right after plugin load, and whenever config changes.
+	Configure(ctx context.Context, config json.RawMessage) error
 	Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *CommandMatch) (HandleResult, error)
 	Shutdown(ctx context.Context) error
 }
@@ -23,13 +28,25 @@ type CallOneBotFunc func(ctx context.Context, action string, params any) (CallRe
 
 // Descriptor mirrors designs/plugin_interface.md.
 type Descriptor struct {
-	Name        string            `json:"name"`
-	PluginID    string            `json:"plugin_id"`
-	Version     string            `json:"version"`
-	Author      string            `json:"author"`
-	Description string            `json:"description"`
-	Commands    []CommandListener `json:"commands"`
-	Events      []EventListener   `json:"events"`
+	Name        string `json:"name"`
+	PluginID    string `json:"plugin_id"`
+	Version     string `json:"version"`
+	Author      string `json:"author"`
+	Description string `json:"description"`
+	// Config declares the plugin configuration contract.
+	// If nil, the plugin does not accept configuration.
+	Config   *ConfigSpec       `json:"config,omitempty"`
+	Commands []CommandListener `json:"commands"`
+	Events   []EventListener   `json:"events"`
+}
+
+// ConfigSpec describes a plugin's configuration schema and defaults.
+// Schema is expected to be JSON Schema (draft-07/2020-12), but treated as opaque JSON by host.
+type ConfigSpec struct {
+	Version     string          `json:"version,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Schema      json.RawMessage `json:"schema,omitempty"`
+	Default     json.RawMessage `json:"default,omitempty"`
 }
 
 type CommandListener struct {

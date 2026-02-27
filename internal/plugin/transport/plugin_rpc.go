@@ -26,6 +26,10 @@ func (s *PluginRPCServer) Describe(_ struct{}, resp *DescribeReply) error {
 	return nil
 }
 
+func (s *PluginRPCServer) Configure(args ConfigureArgs, _ *struct{}) error {
+	return s.Impl.Configure(context.Background(), args.Config)
+}
+
 func (s *PluginRPCServer) Handle(args HandleArgs, resp *HandleReply) error {
 	r, err := s.Impl.Handle(context.Background(), args.ListenerID, args.EventRawJSON, args.Match)
 	if err != nil {
@@ -94,6 +98,12 @@ func (c *PluginRPCClient) Handle(ctx context.Context, listenerID string, eventRa
 		return papi.HandleResult{}, err
 	}
 	return resp, nil
+}
+
+func (c *PluginRPCClient) Configure(ctx context.Context, config json.RawMessage) error {
+	_ = ctx
+	var out struct{}
+	return c.client.Call("Plugin.Configure", ConfigureArgs{Config: config}, &out)
 }
 
 func (c *PluginRPCClient) Shutdown(ctx context.Context) error {

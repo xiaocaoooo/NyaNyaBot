@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -51,7 +52,15 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		disp.Dispatch(ctx, raw)
 	})
 
-	ph := pluginhost.New(pm, func(c context.Context, action string, params any) (ob11.APIResponse, error) {
+	ph := pluginhost.New(pm, func() map[string]json.RawMessage {
+		// Return a snapshot; callers must not mutate.
+		cfg := store.Get()
+		out := make(map[string]json.RawMessage, len(cfg.Plugins))
+		for k, v := range cfg.Plugins {
+			out[k] = v
+		}
+		return out
+	}, func(c context.Context, action string, params any) (ob11.APIResponse, error) {
 		return ob.Call(c, action, params)
 	})
 

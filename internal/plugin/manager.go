@@ -24,22 +24,22 @@ func NewManager() *Manager {
 	return &Manager{plugins: make(map[string]*pluginEntry)}
 }
 
-func (m *Manager) Register(ctx context.Context, p Plugin) error {
+func (m *Manager) Register(ctx context.Context, p Plugin) (Descriptor, error) {
 	d, err := p.Descriptor(ctx)
 	if err != nil {
-		return err
+		return Descriptor{}, err
 	}
 	if d.PluginID == "" {
-		return errors.New("plugin_id is empty")
+		return Descriptor{}, errors.New("plugin_id is empty")
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.plugins[d.PluginID]; ok {
-		return fmt.Errorf("plugin already registered: %s", d.PluginID)
+		return Descriptor{}, fmt.Errorf("plugin already registered: %s", d.PluginID)
 	}
 	m.plugins[d.PluginID] = &pluginEntry{p: p, desc: d}
-	return nil
+	return d, nil
 }
 
 func (m *Manager) List() []Descriptor {

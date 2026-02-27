@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,13 +26,17 @@ type Host struct {
 	mu      sync.Mutex
 	clients []*goplugin.Client
 
-	pm *papi.Manager
+	pm              *papi.Manager
+	getPluginConfig func() map[string]json.RawMessage
 
 	callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
 }
 
-func New(pm *papi.Manager, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)) *Host {
-	return &Host{pm: pm, callOneBot: callOneBot}
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)) *Host {
+	if getPluginConfig == nil {
+		getPluginConfig = func() map[string]json.RawMessage { return nil }
+	}
+	return &Host{pm: pm, getPluginConfig: getPluginConfig, callOneBot: callOneBot}
 }
 
 type hostAPI struct {
@@ -90,9 +95,23 @@ func (h *Host) LoadExec(ctx context.Context, exePath string) error {
 		return fmt.Errorf("unexpected plugin type: %T", raw)
 	}
 
-	if err := h.pm.Register(ctx, p); err != nil {
+	desc, err := h.pm.Register(ctx, p)
+	if err != nil {
 		client.Kill()
 		return err
+	}
+
+	// Push config right after registration.
+	if h.getPluginConfig != nil {
+		cfgs := h.getPluginConfig()
+		if cfgs != nil {
+			if cfg, ok := cfgs[desc.PluginID]; ok {
+				_ = p.Configure(ctx, cfg)
+			} else {
+				// Always call Configure with empty object so plugin can reset.
+				_ = p.Configure(ctx, json.RawMessage("{}"))
+			}
+		}
 	}
 
 	h.mu.Lock()

@@ -15,8 +15,9 @@ const defaultReverseWSListen = "0.0.0.0:3001"
 // AppConfig is persisted under data/config.json.
 // All user-generated config must live inside the data directory.
 type AppConfig struct {
-	OneBot OneBotConfig `json:"onebot"`
-	WebUI  WebUIConfig  `json:"webui"`
+	OneBot  OneBotConfig               `json:"onebot"`
+	WebUI   WebUIConfig                `json:"webui"`
+	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 }
 
 type OneBotConfig struct {
@@ -38,7 +39,8 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-		WebUI: WebUIConfig{ListenAddr: "127.0.0.1:3000"},
+		WebUI:   WebUIConfig{ListenAddr: "127.0.0.1:3000"},
+		Plugins: make(map[string]json.RawMessage),
 	}
 }
 
@@ -84,6 +86,9 @@ func (s *Store) LoadOrCreateDefault() (AppConfig, error) {
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
 	}
+	if cfg.Plugins == nil {
+		cfg.Plugins = make(map[string]json.RawMessage)
+	}
 
 	s.cfg = cfg
 	return s.cfg, nil
@@ -108,6 +113,9 @@ func (s *Store) Update(fn func(*AppConfig)) (AppConfig, error) {
 	}
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
+	}
+	if cfg.Plugins == nil {
+		cfg.Plugins = make(map[string]json.RawMessage)
 	}
 
 	if err := s.saveLocked(cfg); err != nil {
