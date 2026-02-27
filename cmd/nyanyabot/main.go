@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/app"
-	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
-	"github.com/xiaocaoooo/nyanyabot/internal/plugin/builtin/echo"
 )
 
 func main() {
@@ -31,12 +29,6 @@ func main() {
 	if err := a.PH.LoadDir(ctx, "plugins"); err != nil {
 		logger.Error("load plugins dir failed", "err", err)
 	}
-
-	// Register builtin plugins.
-	_ = a.PM.Register(ctx, &echo.Plugin{CallOneBot: func(c context.Context, action string, params any) (plugin.CallResult, error) {
-		resp, err := a.OB.Call(c, action, params)
-		return plugin.CallResult{Raw: resp}, err
-	}})
 
 	// Print plugin info at startup.
 	plugins := a.PM.List()

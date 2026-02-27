@@ -5,6 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/a-h/templ"
+
+	"github.com/xiaocaoooo/nyanyabot/internal/web/ui"
+
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 )
@@ -21,14 +25,119 @@ func New(store *config.Store, pm *plugin.Manager) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// Assets.
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS()))))
+
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("content-type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("nyanyabot webui placeholder\n"))
-	})
+
+	// Pages.
+	mux.HandleFunc("/config", s.handleConfigPage)
+	mux.HandleFunc("/plugins/", s.handlePluginDetailPage)
+	mux.HandleFunc("/plugins", s.handlePluginsPage)
+	mux.HandleFunc("/", s.handleDashboard)
 
 	return mux
+}
+
+func (s *Server) renderHTML(w http.ResponseWriter, r *http.Request, c templ.Component, status int) {
+	templ.Handler(c,
+		templ.WithStatus(status),
+		templ.WithContentType("text/html; charset=utf-8"),
+	).ServeHTTP(w, r)
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		s.renderHTML(w, r, ui.NotFoundPage(r.URL.Path), http.StatusNotFound)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	plugins := s.pm.List()
+	cfg := s.store.Get()
+	s.renderHTML(w, r, ui.Dashboard(cfg, plugins), http.StatusOK)
+}
+
+func (s *Server) handlePluginsPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/plugins" {
+		s.renderHTML(w, r, ui.NotFoundPage(r.URL.Path), http.StatusNotFound)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	plugins := s.pm.List()
+	s.renderHTML(w, r, ui.PluginsPage(plugins), http.StatusOK)
+}
+
+func (s *Server) handlePluginDetailPage(w http.ResponseWriter, r *http.Request) {
+	// /plugins/{pluginID}
+	if !strings.HasPrefix(r.URL.Path, "/plugins/") {
+		s.renderHTML(w, r, ui.NotFoundPage(r.URL.Path), http.StatusNotFound)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	pid := strings.TrimPrefix(r.URL.Path, "/plugins/")
+	pid = strings.TrimSpace(pid)
+	pid = strings.Trim(pid, "/")
+	if pid == "" {
+		http.Redirect(w, r, "/plugins", http.StatusSeeOther)
+		return
+	}
+	_, desc, ok := s.pm.Get(pid)
+	if !ok {
+		s.renderHTML(w, r, ui.NotFoundPage(r.URL.Path), http.StatusNotFound)
+		return
+	}
+	s.renderHTML(w, r, ui.PluginDetailPage(desc), http.StatusOK)
+}
+
+func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := s.store.Get()
+		flashOK := ""
+		if r.URL.Query().Get("saved") == "1" {
+			flashOK = "已保存（重启后生效）"
+		}
+		s.renderHTML(w, r, ui.ConfigPage(cfg, flashOK, ""), http.StatusOK)
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			cfg := s.store.Get()
+			s.renderHTML(w, r, ui.ConfigPage(cfg, "", "表单解析失败: "+err.Error()), http.StatusBadRequest)
+			return
+		}
+		webAddr := strings.TrimSpace(r.FormValue("webui_listen_addr"))
+		obAddr := strings.TrimSpace(r.FormValue("onebot_reverse_ws_listen_addr"))
+
+		_, err := s.store.Update(func(c *config.AppConfig) {
+			if webAddr != "" {
+				c.WebUI.ListenAddr = webAddr
+			} else {
+				c.WebUI.ListenAddr = ""
+			}
+			if obAddr != "" {
+				c.OneBot.ReverseWS.ListenAddr = obAddr
+			} else {
+				c.OneBot.ReverseWS.ListenAddr = ""
+			}
+		})
+		if err != nil {
+			cfg := s.store.Get()
+			s.renderHTML(w, r, ui.ConfigPage(cfg, "", "保存失败: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/config?saved=1", http.StatusSeeOther)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
