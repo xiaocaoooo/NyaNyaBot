@@ -15,6 +15,7 @@ import (
 
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	papi "github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
@@ -28,15 +29,19 @@ type Host struct {
 
 	pm              *papi.Manager
 	getPluginConfig func() map[string]json.RawMessage
+	getGlobals      func() map[string]string
 
 	callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
 }
 
-func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)) *Host {
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)) *Host {
 	if getPluginConfig == nil {
 		getPluginConfig = func() map[string]json.RawMessage { return nil }
 	}
-	return &Host{pm: pm, getPluginConfig: getPluginConfig, callOneBot: callOneBot}
+	if getGlobals == nil {
+		getGlobals = func() map[string]string { return nil }
+	}
+	return &Host{pm: pm, getPluginConfig: getPluginConfig, getGlobals: getGlobals, callOneBot: callOneBot}
 }
 
 type hostAPI struct {
@@ -105,8 +110,17 @@ func (h *Host) LoadExec(ctx context.Context, exePath string) error {
 	if h.getPluginConfig != nil {
 		cfgs := h.getPluginConfig()
 		if cfgs != nil {
+			globals := map[string]string(nil)
+			if h.getGlobals != nil {
+				globals = h.getGlobals()
+			}
 			if cfg, ok := cfgs[desc.PluginID]; ok {
-				_ = p.Configure(ctx, cfg)
+				if patched, err := configtmpl.Apply(cfg, globals); err == nil {
+					_ = p.Configure(ctx, patched)
+				} else {
+					// Fallback: if templating fails, still pass raw config.
+					_ = p.Configure(ctx, cfg)
+				}
 			} else {
 				// Always call Configure with empty object so plugin can reset.
 				_ = p.Configure(ctx, json.RawMessage("{}"))

@@ -15,8 +15,12 @@ const defaultReverseWSListen = "0.0.0.0:3001"
 // AppConfig is persisted under data/config.json.
 // All user-generated config must live inside the data directory.
 type AppConfig struct {
-	OneBot  OneBotConfig               `json:"onebot"`
-	WebUI   WebUIConfig                `json:"webui"`
+	OneBot OneBotConfig `json:"onebot"`
+	WebUI  WebUIConfig  `json:"webui"`
+	// Globals are user-defined variables for config templating.
+	// They can be referenced in plugin config strings as ${name}.
+	// To keep a literal placeholder, use \${name} (will become ${name} without substitution).
+	Globals map[string]string          `json:"globals,omitempty"`
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 }
 
@@ -40,6 +44,7 @@ func Default() AppConfig {
 			},
 		},
 		WebUI:   WebUIConfig{ListenAddr: "127.0.0.1:3000"},
+		Globals: make(map[string]string),
 		Plugins: make(map[string]json.RawMessage),
 	}
 }
@@ -86,6 +91,9 @@ func (s *Store) LoadOrCreateDefault() (AppConfig, error) {
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
 	}
+	if cfg.Globals == nil {
+		cfg.Globals = make(map[string]string)
+	}
 	if cfg.Plugins == nil {
 		cfg.Plugins = make(map[string]json.RawMessage)
 	}
@@ -113,6 +121,9 @@ func (s *Store) Update(fn func(*AppConfig)) (AppConfig, error) {
 	}
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
+	}
+	if cfg.Globals == nil {
+		cfg.Globals = make(map[string]string)
 	}
 	if cfg.Plugins == nil {
 		cfg.Plugins = make(map[string]json.RawMessage)

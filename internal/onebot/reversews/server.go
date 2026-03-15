@@ -42,6 +42,7 @@ type Server struct {
 
 type session struct {
 	conn *websocket.Conn
+	remote string
 
 	mu      sync.Mutex
 	pending map[string]chan ob11.APIResponse
@@ -105,7 +106,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("onebot connected", "remote", r.RemoteAddr)
-	sess := &session{conn: c, pending: make(map[string]chan ob11.APIResponse)}
+	sess := &session{conn: c, remote: r.RemoteAddr, pending: make(map[string]chan ob11.APIResponse)}
 
 	// Swap session (last connection wins).
 	s.mu.Lock()
@@ -202,6 +203,7 @@ func (s *Server) Call(ctx context.Context, action string, params any) (ob11.APIR
 	// Send.
 	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	s.logger.Debug("onebot ws send", "remote", sess.remote, "bytes", len(payload), "payload", truncateForLog(payload, 8*1024))
 	if err := sess.conn.Write(writeCtx, websocket.MessageText, payload); err != nil {
 		// cleanup pending
 		sess.mu.Lock()

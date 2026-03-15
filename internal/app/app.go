@@ -60,6 +60,13 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 			out[k] = v
 		}
 		return out
+	}, func() map[string]string {
+		cfg := store.Get()
+		out := make(map[string]string, len(cfg.Globals))
+		for k, v := range cfg.Globals {
+			out[k] = v
+		}
+		return out
 	}, func(c context.Context, action string, params any) (ob11.APIResponse, error) {
 		return ob.Call(c, action, params)
 	})

@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/web/ui"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
+	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/web/schemaform"
 )
@@ -76,7 +78,11 @@ func (s *Server) handlePluginConfigAPI(w http.ResponseWriter, r *http.Request, p
 		// Hot-apply.
 		p, _, ok := s.pm.Get(pluginID)
 		if ok {
-			_ = p.Configure(r.Context(), cfg.Plugins[pluginID])
+			patched, err := configtmpl.Apply(cfg.Plugins[pluginID], cfg.Globals)
+			if err != nil {
+				patched = cfg.Plugins[pluginID]
+			}
+			_ = p.Configure(r.Context(), patched)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -100,16 +106,82 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS()))))
 
 	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/globals", s.handleGlobals)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
 	mux.HandleFunc("/api/plugins/", s.handlePluginSubAPI)
 
 	// Pages.
 	mux.HandleFunc("/config", s.handleConfigPage)
+	mux.HandleFunc("/globals", s.handleGlobalsPage)
 	mux.HandleFunc("/plugins/", s.handlePluginSubPage)
 	mux.HandleFunc("/plugins", s.handlePluginsPage)
 	mux.HandleFunc("/", s.handleDashboard)
 
 	return mux
+}
+
+// hotApplyAllPluginConfigs reapplies current globals into each persisted plugin config and calls Configure.
+// This is used when globals change so plugins can take effect without editing each plugin config.
+func (s *Server) hotApplyAllPluginConfigs(ctx context.Context, cfg config.AppConfig) {
+	if s == nil || s.pm == nil {
+		return
+	}
+	for pluginID, raw := range cfg.Plugins {
+		p, _, ok := s.pm.Get(pluginID)
+		if !ok {
+			continue
+		}
+		patched, err := configtmpl.Apply(raw, cfg.Globals)
+		if err != nil {
+			patched = raw
+		}
+		_ = p.Configure(ctx, patched)
+	}
+}
+
+func (s *Server) handleGlobals(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := s.store.Get()
+		if cfg.Globals == nil {
+			cfg.Globals = map[string]string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"globals": cfg.Globals})
+	case http.MethodPut:
+		var patch struct {
+			Globals map[string]string `json:"globals"`
+		}
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&patch); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		cfg, err := s.store.Update(func(c *config.AppConfig) {
+			if c.Globals == nil {
+				c.Globals = make(map[string]string)
+			}
+			// Replace all.
+			c.Globals = make(map[string]string, len(patch.Globals))
+			for k, v := range patch.Globals {
+				k = strings.TrimSpace(k)
+				if k == "" {
+					continue
+				}
+				c.Globals[k] = strings.TrimSpace(v)
+			}
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		// Globals changed; reconfigure plugins.
+		s.hotApplyAllPluginConfigs(r.Context(), cfg)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "globals": cfg.Globals})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handlePluginSubAPI(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +387,11 @@ func (s *Server) handlePluginConfigPage(w http.ResponseWriter, r *http.Request, 
 		// Hot-apply.
 		p2, _, ok := s.pm.Get(pluginID)
 		if ok {
-			_ = p2.Configure(r.Context(), cfg.Plugins[pluginID])
+			patched, err := configtmpl.Apply(cfg.Plugins[pluginID], cfg.Globals)
+			if err != nil {
+				patched = cfg.Plugins[pluginID]
+			}
+			_ = p2.Configure(r.Context(), patched)
 		}
 		http.Redirect(w, r, "/plugins/"+pluginID+"/config?saved=1", http.StatusSeeOther)
 	default:
@@ -327,17 +403,65 @@ func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		cfg := s.store.Get()
-		flashOK := ""
-		if r.URL.Query().Get("saved") == "1" {
-			flashOK = "已保存（重启后生效）"
+		mode := strings.TrimSpace(r.URL.Query().Get("mode"))
+		if mode != "env" {
+			mode = "table"
 		}
-		s.renderHTML(w, r, ui.ConfigPage(cfg, flashOK, ""), http.StatusOK)
+		flashConfigOK := ""
+		flashGlobalsOK := ""
+		switch r.URL.Query().Get("saved") {
+		case "config":
+			flashConfigOK = "已保存（重启后生效）"
+		case "globals":
+			flashGlobalsOK = "已保存"
+		}
+		s.renderHTML(w, r, ui.ConfigPage(cfg, mode, flashConfigOK, "", flashGlobalsOK, ""), http.StatusOK)
 	case http.MethodPost:
 		if err := r.ParseForm(); err != nil {
 			cfg := s.store.Get()
-			s.renderHTML(w, r, ui.ConfigPage(cfg, "", "表单解析失败: "+err.Error()), http.StatusBadRequest)
+			s.renderHTML(w, r, ui.ConfigPage(cfg, "table", "", "表单解析失败: "+err.Error(), "", ""), http.StatusBadRequest)
 			return
 		}
+		section := strings.TrimSpace(r.FormValue("section"))
+		if section == "globals" {
+			mode := strings.TrimSpace(r.FormValue("mode"))
+			if mode != "env" {
+				mode = "table"
+			}
+			var m map[string]string
+			switch mode {
+			case "table":
+				m = parseGlobalsFromDynamicTable(r.PostForm)
+			default:
+				m = parseGlobalsFromEnvText(r.FormValue("globals_env"))
+			}
+			cfg, err := s.store.Update(func(c *config.AppConfig) {
+				if c.Globals == nil {
+					c.Globals = make(map[string]string)
+				}
+				c.Globals = make(map[string]string, len(m))
+				for k, v := range m {
+					k = strings.TrimSpace(k)
+					if k == "" {
+						continue
+					}
+					c.Globals[k] = strings.TrimSpace(v)
+				}
+			})
+			if err != nil {
+				cfg2 := s.store.Get()
+				s.renderHTML(w, r, ui.ConfigPage(cfg2, mode, "", "", "", "保存失败: "+err.Error()), http.StatusInternalServerError)
+				return
+			}
+			s.hotApplyAllPluginConfigs(r.Context(), cfg)
+			if mode == "table" {
+				http.Redirect(w, r, "/config?saved=globals&mode=table#globals", http.StatusSeeOther)
+				return
+			}
+			http.Redirect(w, r, "/config?saved=globals&mode=env#globals", http.StatusSeeOther)
+			return
+		}
+
 		webAddr := strings.TrimSpace(r.FormValue("webui_listen_addr"))
 		obAddr := strings.TrimSpace(r.FormValue("onebot_reverse_ws_listen_addr"))
 
@@ -355,15 +479,144 @@ func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			cfg := s.store.Get()
-			s.renderHTML(w, r, ui.ConfigPage(cfg, "", "保存失败: "+err.Error()), http.StatusInternalServerError)
+			s.renderHTML(w, r, ui.ConfigPage(cfg, "table", "", "保存失败: "+err.Error(), "", ""), http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, r, "/config?saved=1", http.StatusSeeOther)
+		http.Redirect(w, r, "/config?saved=config", http.StatusSeeOther)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
+func (s *Server) handleGlobalsPage(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		mode := strings.TrimSpace(r.URL.Query().Get("mode"))
+		if mode != "env" {
+			mode = "table"
+		}
+		target := "/config"
+		if mode == "env" {
+			target = "/config?mode=env"
+		}
+		http.Redirect(w, r, target+"#globals", http.StatusSeeOther)
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			cfg := s.store.Get()
+			s.renderHTML(w, r, ui.ConfigPage(cfg, "table", "", "", "", "表单解析失败: "+err.Error()), http.StatusBadRequest)
+			return
+		}
+		mode := strings.TrimSpace(r.FormValue("mode"))
+		var m map[string]string
+		switch mode {
+		case "table":
+			m = parseGlobalsFromDynamicTable(r.PostForm)
+		default:
+			// env-text mode
+			m = parseGlobalsFromEnvText(r.FormValue("globals_env"))
+		}
+
+		cfg, err := s.store.Update(func(c *config.AppConfig) {
+			if c.Globals == nil {
+				c.Globals = make(map[string]string)
+			}
+			c.Globals = make(map[string]string, len(m))
+			for k, v := range m {
+				k = strings.TrimSpace(k)
+				if k == "" {
+					continue
+				}
+				c.Globals[k] = strings.TrimSpace(v)
+			}
+		})
+		if err != nil {
+			cfg2 := s.store.Get()
+			s.renderHTML(w, r, ui.ConfigPage(cfg2, mode, "", "", "", "保存失败: "+err.Error()), http.StatusInternalServerError)
+			return
+		}
+		// Globals changed; reconfigure plugins.
+		s.hotApplyAllPluginConfigs(r.Context(), cfg)
+		// Preserve editor mode after save.
+		if mode == "table" {
+			http.Redirect(w, r, "/config?saved=globals&mode=table#globals", http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/config?saved=globals&mode=env#globals", http.StatusSeeOther)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func parseGlobalsFromEnvText(s string) map[string]string {
+	out := make(map[string]string)
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			// Ignore malformed lines.
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = strings.TrimSpace(v)
+	}
+	return out
+}
+
+func parseGlobalsFromTable(keys []string, vals []string) map[string]string {
+	out := make(map[string]string)
+	for i := 0; i < len(keys); i++ {
+		k := strings.TrimSpace(keys[i])
+		if k == "" {
+			continue
+		}
+		v := ""
+		if i < len(vals) {
+			v = strings.TrimSpace(vals[i])
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func parseGlobalsFromDynamicTable(form map[string][]string) map[string]string {
+	out := make(map[string]string)
+	rows := form["global_row"]
+	for _, idx := range rows {
+		idx = strings.TrimSpace(idx)
+		if idx == "" {
+			continue
+		}
+		// Only include enabled rows.
+		onKey := "global_on_" + idx
+		if _, ok := form[onKey]; !ok {
+			continue
+		}
+		kKey := "global_key_" + idx
+		vKey := "global_value_" + idx
+		k := ""
+		if vs := form[kKey]; len(vs) > 0 {
+			k = strings.TrimSpace(vs[0])
+		}
+		if k == "" {
+			continue
+		}
+		v := ""
+		if vs := form[vKey]; len(vs) > 0 {
+			v = strings.TrimSpace(vs[0])
+		}
+		out[k] = v
+	}
+	return out
+}
 func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

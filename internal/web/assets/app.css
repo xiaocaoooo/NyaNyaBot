@@ -148,12 +148,65 @@ a:hover { text-decoration: underline; }
   color: var(--text);
 }
 
+.btn.small {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
 .btn.primary {
   border-color: rgba(124, 58, 237, 0.55);
   background: rgba(124, 58, 237, 0.25);
 }
 
 .btn:hover { filter: brightness(1.08); text-decoration: none; }
+
+/* Toggle switch */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.toggle .slider {
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle .slider::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  transition: transform 0.15s ease;
+}
+
+.toggle input:checked + .slider {
+  background: rgba(124, 58, 237, 0.25);
+  border-color: rgba(124, 58, 237, 0.55);
+}
+
+.toggle input:checked + .slider::after {
+  transform: translateX(18px);
+}
 
 .table {
   width: 100%;
@@ -168,6 +221,17 @@ a:hover { text-decoration: underline; }
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+}
+
+.table td { vertical-align: middle; }
+
+.table input {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
 }
 
 .table th {
@@ -265,3 +329,18 @@ a:hover { text-decoration: underline; }
 .flash.bad { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.12); }
 
 .muted { color: var(--muted); }
+
+/* Globals page mode switch (CSS-only; mode is controlled by server-selected radio) */
+.globals-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.globals-switch {
+  position: relative;
+}
+
+.globals-pane { display: none; }
+#globals_mode_env:checked ~ .globals-env { display: block; }
+#globals_mode_table:checked ~ .globals-table { display: block; }
