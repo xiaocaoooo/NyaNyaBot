@@ -673,6 +673,12 @@ export function PluginsScreen() {
                         <Chip radius="sm" variant="flat">
                           {t("plugins.events", { count: selectedPlugin.events.length })}
                         </Chip>
+                        <Chip radius="sm" variant="flat">
+                          {t("plugins.dependencies", { count: selectedPlugin.dependencies.length })}
+                        </Chip>
+                        <Chip radius="sm" variant="flat">
+                          {t("plugins.exports", { count: selectedPlugin.exports.length })}
+                        </Chip>
                       </div>
                     </div>
 
@@ -703,6 +709,37 @@ export function PluginsScreen() {
                               <li key={event.id}>
                                 <p className="font-medium text-text">{event.name}</p>
                                 <p className="font-mono text-xs">{event.event}</p>
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
+                        <p className="text-sm font-medium text-text">{t("plugins.dependencyList")}</p>
+                        <ul className="mt-2 space-y-2 text-sm text-muted">
+                          {selectedPlugin.dependencies.length === 0 ? (
+                            <li>{t("plugins.none")}</li>
+                          ) : (
+                            selectedPlugin.dependencies.slice(0, 6).map((dependency) => (
+                              <li key={dependency}>
+                                <p className="font-mono text-xs">{dependency}</p>
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
+                        <p className="text-sm font-medium text-text">{t("plugins.exportList")}</p>
+                        <ul className="mt-2 space-y-2 text-sm text-muted">
+                          {selectedPlugin.exports.length === 0 ? (
+                            <li>{t("plugins.none")}</li>
+                          ) : (
+                            selectedPlugin.exports.slice(0, 6).map((spec) => (
+                              <li key={spec.name}>
+                                <p className="font-medium text-text">{spec.name}</p>
+                                <p className="text-xs text-muted">{spec.description || "-"}</p>
                               </li>
                             ))
                           )}

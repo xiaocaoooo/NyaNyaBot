@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sync"
 
@@ -30,6 +32,10 @@ func (e *Echo) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 		Version:     "0.1.0",
 		Author:      "nyanyabot",
 		Description: "Echo test plugin (go-plugin)",
+		Dependencies: []string{
+			"external.configdump",
+		},
+		Exports: []papi.ExportSpec{},
 		Config: &papi.ConfigSpec{
 			Version:     "1",
 			Description: "Echo plugin config",
@@ -45,6 +51,14 @@ func (e *Echo) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 				Pattern:  `^/?echo\s+(.+)$`,
 				MatchRaw: true,
 				Handler:  "HandleEcho",
+			},
+			{
+				Name:        "echo_cfg",
+				ID:          "cmd.echo.cfg",
+				Description: "调用 external.configdump 导出函数并回显结果",
+				Pattern:     `^/?echo_cfg(?:\s+(pretty))?$`,
+				MatchRaw:    true,
+				Handler:     "HandleEchoCfg",
 			},
 		},
 	}, nil
@@ -65,11 +79,21 @@ func (e *Echo) Configure(ctx context.Context, config json.RawMessage) error {
 	return nil
 }
 
+func (e *Echo) Invoke(ctx context.Context, method string, paramsJSON json.RawMessage, callerPluginID string) (json.RawMessage, error) {
+	_ = ctx
+	_ = method
+	_ = paramsJSON
+	_ = callerPluginID
+	return nil, papi.NewStructuredError(papi.ErrorCodeNotFound, "method is not exported")
+}
+
 func (e *Echo) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	_ = ctx
 	switch listenerID {
 	case "cmd.echo":
 		return e.handleEcho(eventRaw, match)
+	case "cmd.echo.cfg":
+		return e.handleEchoCfg(eventRaw, match)
 	default:
 		return papi.HandleResult{}, nil
 	}
@@ -120,6 +144,51 @@ func (e *Echo) handleEcho(eventRaw ob11.Event, match *papi.CommandMatch) (papi.H
 		text = prefix + text
 	}
 
+	sendMessage(host, msgType, evt, text)
+	return papi.HandleResult{}, nil
+}
+
+func (e *Echo) handleEchoCfg(eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
+	host := transport.Host()
+	if host == nil {
+		return papi.HandleResult{}, nil
+	}
+
+	var evt map[string]any
+	if err := json.Unmarshal(eventRaw, &evt); err != nil {
+		return papi.HandleResult{}, nil
+	}
+
+	msgType, _ := evt["message_type"].(string)
+	pretty := match != nil && len(match.Groups) > 0 && match.Groups[0] == "pretty"
+
+	resultJSON, err := host.CallDependency(context.Background(), "external.configdump", "configdump.snapshot", map[string]any{
+		"pretty": pretty,
+	})
+	if err != nil {
+		if serr := papi.AsStructuredError(err); serr != nil {
+			sendMessage(host, msgType, evt, fmt.Sprintf("dep call failed: %s (%s)", serr.Message, serr.Code))
+		} else {
+			sendMessage(host, msgType, evt, "dep call failed: "+err.Error())
+		}
+		return papi.HandleResult{}, nil
+	}
+
+	reply := string(resultJSON)
+	if pretty {
+		var out bytes.Buffer
+		if err := json.Indent(&out, resultJSON, "", "  "); err == nil {
+			reply = out.String()
+		}
+	}
+	sendMessage(host, msgType, evt, "dep result: "+reply)
+	return papi.HandleResult{}, nil
+}
+
+func sendMessage(host *transport.HostRPCClient, msgType string, evt map[string]any, text string) {
+	if host == nil || text == "" {
+		return
+	}
 	if msgType == "group" {
 		groupID := evt["group_id"]
 		_, _ = host.CallOneBot(context.Background(), "send_group_msg", map[string]any{
@@ -133,8 +202,6 @@ func (e *Echo) handleEcho(eventRaw ob11.Event, match *papi.CommandMatch) (papi.H
 			"message": text,
 		})
 	}
-
-	return papi.HandleResult{}, nil
 }
 
 func main() {

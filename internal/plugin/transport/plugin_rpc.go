@@ -30,6 +30,17 @@ func (s *PluginRPCServer) Configure(args ConfigureArgs, _ *struct{}) error {
 	return s.Impl.Configure(context.Background(), args.Config)
 }
 
+func (s *PluginRPCServer) Invoke(args InvokeArgs, resp *InvokeReply) error {
+	result, err := s.Impl.Invoke(context.Background(), args.Method, args.Params, args.CallerPluginID)
+	if err != nil {
+		resp.Error = papi.NormalizeStructuredError(err, papi.ErrorCodeInternal)
+		return nil
+	}
+	resp.Result = result
+	resp.Error = nil
+	return nil
+}
+
 func (s *PluginRPCServer) Handle(args HandleArgs, resp *HandleReply) error {
 	r, err := s.Impl.Handle(context.Background(), args.ListenerID, args.EventRawJSON, args.Match)
 	if err != nil {
@@ -47,8 +58,7 @@ type AttachHostArgs struct {
 	BrokerID uint32 `json:"broker_id"`
 }
 
-// AttachHost is called by host right after dispensing the plugin.
-// It sets up a long-lived RPC client back to host APIs (CallOneBot).
+// AttachHost is called by host to set up the host callback client in plugin process.
 func (s *PluginRPCServer) AttachHost(args AttachHostArgs, _ *struct{}) error {
 	if s.B == nil {
 		return nil
@@ -66,10 +76,11 @@ func (s *PluginRPCServer) AttachHost(args AttachHostArgs, _ *struct{}) error {
 // PluginRPCClient is used on the host to call into the plugin.
 type PluginRPCClient struct {
 	client *rpc.Client
+	broker *plugin.MuxBroker
 }
 
 // In plugin process we keep a global host RPC client, so plugin implementations
-// can call back into host APIs (CallOneBot).
+// can call back into host APIs (CallOneBot / CallDependency).
 var hostClient *HostRPCClient
 
 func SetHost(c *HostRPCClient) { hostClient = c }
@@ -88,6 +99,19 @@ func (c *PluginRPCClient) Describe(ctx context.Context) (papi.Descriptor, error)
 		return papi.Descriptor{}, err
 	}
 	return resp, nil
+}
+
+func (c *PluginRPCClient) Invoke(ctx context.Context, method string, paramsJSON json.RawMessage, callerPluginID string) (json.RawMessage, error) {
+	_ = ctx
+	var resp InvokeReply
+	args := InvokeArgs{Method: method, Params: paramsJSON, CallerPluginID: callerPluginID}
+	if err := c.client.Call("Plugin.Invoke", args, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+	return resp.Result, nil
 }
 
 func (c *PluginRPCClient) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
@@ -112,6 +136,19 @@ func (c *PluginRPCClient) Shutdown(ctx context.Context) error {
 	return c.client.Call("Plugin.Shutdown", struct{}{}, &out)
 }
 
+func (c *PluginRPCClient) AttachHost(ctx context.Context, host HostAPI) error {
+	_ = ctx
+	if c.broker == nil || host == nil {
+		return nil
+	}
+	bid := ServeHostAPI(c.broker, host)
+	if bid == 0 {
+		return nil
+	}
+	var out struct{}
+	return c.client.Call("Plugin.AttachHost", AttachHostArgs{BrokerID: bid}, &out)
+}
+
 // ===== Host-side service (called by plugin) =====
 
 type HostRPCServer struct {
@@ -130,6 +167,13 @@ func (s *HostRPCServer) CallOneBot(args CallOneBotArgs, resp *CallOneBotReply) e
 		return err
 	}
 	resp.Resp = r
+	return nil
+}
+
+func (s *HostRPCServer) CallDependency(args CallDependencyArgs, resp *CallDependencyReply) error {
+	result, serr := s.Impl.CallDependency(context.Background(), args.TargetPluginID, args.Method, args.Params)
+	resp.Result = result
+	resp.Error = serr
 	return nil
 }
 
@@ -152,6 +196,22 @@ func (c *HostRPCClient) CallOneBot(ctx context.Context, action string, params an
 	return resp.Resp, nil
 }
 
+func (c *HostRPCClient) CallDependency(ctx context.Context, targetPluginID string, method string, params any) (json.RawMessage, error) {
+	_ = ctx
+	b, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	var resp CallDependencyReply
+	if err := c.client.Call("Plugin.CallDependency", CallDependencyArgs{TargetPluginID: targetPluginID, Method: method, Params: b}, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+	return resp.Result, nil
+}
+
 // ===== go-plugin wiring =====
 
 const PluginName = "nyanyabot_plugin"
@@ -167,7 +227,8 @@ var handshake = plugin.HandshakeConfig{
 type Map struct {
 	// PluginImpl is only set in plugin process.
 	PluginImpl papi.Plugin
-	// Host is only set in host process; used to expose CallOneBot to plugin.
+	// Host is optional in host process. If provided, it is attached immediately.
+	// Most code paths should call PluginRPCClient.AttachHost with caller-bound HostAPI after descriptor handshake.
 	Host HostAPI
 }
 
@@ -179,12 +240,11 @@ func (m *Map) Server(b *plugin.MuxBroker) (interface{}, error) {
 }
 
 func (m *Map) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
-	// In host process: attach host API callback over broker, then return plugin client.
-	if m.Host != nil && b != nil {
-		bid := ServeHostAPI(b, m.Host)
-		_ = c.Call("Plugin.AttachHost", AttachHostArgs{BrokerID: bid}, &struct{}{})
+	pc := &PluginRPCClient{client: c, broker: b}
+	if m.Host != nil {
+		_ = pc.AttachHost(context.Background(), m.Host)
 	}
-	return &PluginRPCClient{client: c}, nil
+	return pc, nil
 }
 
 // ServeHostAPI serves the host API over a brokered net/rpc stream.

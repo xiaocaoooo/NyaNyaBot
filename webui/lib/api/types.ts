@@ -46,12 +46,21 @@ export interface EventListener {
   handler: string;
 }
 
+export interface ExportSpec {
+  name: string;
+  description: string;
+  params_schema: unknown;
+  result_schema: unknown;
+}
+
 export interface PluginDescriptor {
   name: string;
   plugin_id: string;
   version: string;
   author: string;
   description: string;
+  dependencies: string[];
+  exports: ExportSpec[];
   config?: PluginConfigSpec;
   commands: CommandListener[];
   events: EventListener[];

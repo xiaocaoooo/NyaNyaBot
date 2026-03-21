@@ -4,6 +4,7 @@ import type {
   AuthStatusResponse,
   CommandListener,
   ConfigPatch,
+  ExportSpec,
   EventListener,
   GlobalsResponse,
   LoginPayload,
@@ -68,12 +69,16 @@ function ensureArray<T>(value: T[] | null | undefined): T[] {
 
 function normalizePluginDescriptor(
   plugin: PluginDescriptor & {
+    dependencies?: string[] | null;
+    exports?: ExportSpec[] | null;
     commands?: CommandListener[] | null;
     events?: EventListener[] | null;
   },
 ): PluginDescriptor {
   return {
     ...plugin,
+    dependencies: ensureArray(plugin.dependencies),
+    exports: ensureArray(plugin.exports),
     commands: ensureArray(plugin.commands),
     events: ensureArray(plugin.events),
   };

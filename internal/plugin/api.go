@@ -18,6 +18,9 @@ type Plugin interface {
 	// config is an arbitrary JSON object, typically stored in host config.
 	// Host should call this once right after plugin load, and whenever config changes.
 	Configure(ctx context.Context, config json.RawMessage) error
+	// Invoke handles cross-plugin method calls routed by host.
+	// callerPluginID is set by host and cannot be forged by plugin side.
+	Invoke(ctx context.Context, method string, paramsJSON json.RawMessage, callerPluginID string) (resultJSON json.RawMessage, err error)
 	Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *CommandMatch) (HandleResult, error)
 	Shutdown(ctx context.Context) error
 }
@@ -33,6 +36,10 @@ type Descriptor struct {
 	Version     string `json:"version"`
 	Author      string `json:"author"`
 	Description string `json:"description"`
+	// Dependencies declares direct plugin dependencies that can be invoked at runtime.
+	Dependencies []string `json:"dependencies"`
+	// Exports declares callable methods this plugin exposes to other plugins.
+	Exports []ExportSpec `json:"exports"`
 	// Config declares the plugin configuration contract.
 	// If nil, the plugin does not accept configuration.
 	Config   *ConfigSpec       `json:"config,omitempty"`
@@ -47,6 +54,13 @@ type ConfigSpec struct {
 	Description string          `json:"description,omitempty"`
 	Schema      json.RawMessage `json:"schema,omitempty"`
 	Default     json.RawMessage `json:"default,omitempty"`
+}
+
+type ExportSpec struct {
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	ParamsSchema json.RawMessage `json:"params_schema"`
+	ResultSchema json.RawMessage `json:"result_schema"`
 }
 
 type CommandListener struct {

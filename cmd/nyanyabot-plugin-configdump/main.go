@@ -28,11 +28,20 @@ func (p *ConfigDump) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 	def := json.RawMessage(`{"prefix":"CFG: "}`)
 
 	return papi.Descriptor{
-		Name:        "ConfigDump",
-		PluginID:    "external.configdump",
-		Version:     "0.1.0",
-		Author:      "nyanyabot",
-		Description: "Test plugin: reply with the current runtime config (hot updated via Configure)",
+		Name:         "ConfigDump",
+		PluginID:     "external.configdump",
+		Version:      "0.1.0",
+		Author:       "nyanyabot",
+		Description:  "Test plugin: reply with the current runtime config (hot updated via Configure)",
+		Dependencies: []string{},
+		Exports: []papi.ExportSpec{
+			{
+				Name:         "configdump.snapshot",
+				Description:  "返回当前生效配置快照（供其他插件调用）",
+				ParamsSchema: json.RawMessage(`{"type":"object","properties":{"pretty":{"type":"boolean"}},"additionalProperties":false}`),
+				ResultSchema: json.RawMessage(`{"type":"object","properties":{"caller_plugin_id":{"type":"string"},"prefix":{"type":"string"},"config":{"type":"object"}},"required":["caller_plugin_id","prefix","config"],"additionalProperties":true}`),
+			},
+		},
 		Config: &papi.ConfigSpec{
 			Version:     "1",
 			Description: "ConfigDump plugin config",
@@ -72,6 +81,54 @@ func (p *ConfigDump) Configure(ctx context.Context, config json.RawMessage) erro
 	p.prefix = parsed.Prefix
 	p.mu.Unlock()
 	return nil
+}
+
+func (p *ConfigDump) Invoke(ctx context.Context, method string, paramsJSON json.RawMessage, callerPluginID string) (json.RawMessage, error) {
+	_ = ctx
+	switch method {
+	case "configdump.snapshot":
+		var req struct {
+			Pretty bool `json:"pretty"`
+		}
+		if len(paramsJSON) > 0 {
+			if err := json.Unmarshal(paramsJSON, &req); err != nil {
+				return nil, papi.NewStructuredError(papi.ErrorCodeInvalidParams, "params must be a JSON object")
+			}
+		}
+
+		p.mu.RLock()
+		prefix := p.prefix
+		rawCfg := append([]byte(nil), p.rawConfig...)
+		p.mu.RUnlock()
+		if len(rawCfg) == 0 {
+			rawCfg = []byte("{}")
+		}
+
+		var cfgObj map[string]any
+		if err := json.Unmarshal(rawCfg, &cfgObj); err != nil {
+			return nil, papi.NewStructuredError(papi.ErrorCodeInternal, "stored config is not valid JSON object")
+		}
+
+		payload := map[string]any{
+			"caller_plugin_id": callerPluginID,
+			"prefix":           prefix,
+			"config":           cfgObj,
+		}
+		if req.Pretty {
+			var out bytes.Buffer
+			if err := json.Indent(&out, rawCfg, "", "  "); err == nil {
+				payload["config_pretty"] = out.String()
+			}
+		}
+
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, papi.NewStructuredError(papi.ErrorCodeInternal, err.Error())
+		}
+		return b, nil
+	default:
+		return nil, papi.NewStructuredError(papi.ErrorCodeNotFound, "method is not exported")
+	}
 }
 
 func (p *ConfigDump) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
