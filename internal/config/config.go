@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,8 +20,8 @@ type AppConfig struct {
 	OneBot OneBotConfig `json:"onebot"`
 	WebUI  WebUIConfig  `json:"webui"`
 	// Globals are user-defined variables for config templating.
-	// They can be referenced in plugin config strings as ${name}.
-	// To keep a literal placeholder, use \${name} (will become ${name} without substitution).
+	// They can be referenced in plugin config strings as ${global:name}.
+	// To keep a literal placeholder, use \${global:name} (will become ${global:name} without substitution).
 	Globals map[string]string          `json:"globals,omitempty"`
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 }
@@ -34,6 +36,7 @@ type ReverseWSConfig struct {
 
 type WebUIConfig struct {
 	ListenAddr string `json:"listen_addr"`
+	Password   string `json:"password"`
 }
 
 func Default() AppConfig {
@@ -72,7 +75,11 @@ func (s *Store) LoadOrCreateDefault() (AppConfig, error) {
 	b, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.cfg = Default()
+			cfg := Default()
+			if _, err := s.ensureDefaultsLocked(&cfg); err != nil {
+				return AppConfig{}, err
+			}
+			s.cfg = cfg
 			return s.cfg, s.saveLocked(s.cfg)
 		}
 		return AppConfig{}, err
@@ -85,21 +92,16 @@ func (s *Store) LoadOrCreateDefault() (AppConfig, error) {
 	}
 
 	// Apply defaults for new fields.
-	if cfg.OneBot.ReverseWS.ListenAddr == "" {
-		cfg.OneBot.ReverseWS.ListenAddr = defaultReverseWSListen
-	}
-	if cfg.WebUI.ListenAddr == "" {
-		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
-	}
-	if cfg.Globals == nil {
-		cfg.Globals = make(map[string]string)
-	}
-	if cfg.Plugins == nil {
-		cfg.Plugins = make(map[string]json.RawMessage)
+	changed, err := s.ensureDefaultsLocked(&cfg)
+	if err != nil {
+		return AppConfig{}, err
 	}
 
 	s.cfg = cfg
-	return s.cfg, nil
+	if !changed {
+		return s.cfg, nil
+	}
+	return s.cfg, s.saveLocked(s.cfg)
 }
 
 func (s *Store) Get() AppConfig {
@@ -116,17 +118,8 @@ func (s *Store) Update(fn func(*AppConfig)) (AppConfig, error) {
 	fn(&cfg)
 
 	// Keep defaults / sanitize.
-	if cfg.OneBot.ReverseWS.ListenAddr == "" {
-		cfg.OneBot.ReverseWS.ListenAddr = defaultReverseWSListen
-	}
-	if cfg.WebUI.ListenAddr == "" {
-		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
-	}
-	if cfg.Globals == nil {
-		cfg.Globals = make(map[string]string)
-	}
-	if cfg.Plugins == nil {
-		cfg.Plugins = make(map[string]json.RawMessage)
+	if _, err := s.ensureDefaultsLocked(&cfg); err != nil {
+		return AppConfig{}, err
 	}
 
 	if err := s.saveLocked(cfg); err != nil {
@@ -147,4 +140,52 @@ func (s *Store) saveLocked(cfg AppConfig) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
+	changed := false
+
+	if cfg == nil {
+		return false, errors.New("config is nil")
+	}
+	if cfg.OneBot.ReverseWS.ListenAddr == "" {
+		cfg.OneBot.ReverseWS.ListenAddr = defaultReverseWSListen
+		changed = true
+	}
+	if cfg.WebUI.ListenAddr == "" {
+		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
+		changed = true
+	}
+	if cfg.WebUI.Password == "" {
+		password, err := generateWebUIPassword(24)
+		if err != nil {
+			return false, err
+		}
+		cfg.WebUI.Password = password
+		changed = true
+	}
+	if cfg.Globals == nil {
+		cfg.Globals = make(map[string]string)
+		changed = true
+	}
+	if cfg.Plugins == nil {
+		cfg.Plugins = make(map[string]json.RawMessage)
+		changed = true
+	}
+	return changed, nil
+}
+
+func generateWebUIPassword(length int) (string, error) {
+	if length <= 0 {
+		return "", errors.New("password length must be positive")
+	}
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(buf)
+	if len(encoded) < length {
+		return "", errors.New("generated password is too short")
+	}
+	return encoded[:length], nil
 }

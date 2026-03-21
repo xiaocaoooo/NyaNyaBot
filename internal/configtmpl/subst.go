@@ -8,12 +8,13 @@ import (
 	"unicode"
 )
 
-// Apply replaces ${var} placeholders in all JSON string values.
+// Apply replaces placeholders in all JSON string values.
 //
 // Rules:
-//  1. Reference: ${name}
-//  2. Escape: \${name} => literal ${name}
-//  3. Unknown variables are kept as-is (${name})
+//  1. Global reference: ${global:name}
+//  2. Env reference: ${env:NAME}
+//  3. Escape: \${global:name} => literal ${global:name}
+//  4. Unknown variables are kept as-is
 //
 // This is intended for plugin configuration before it is passed to plugins.
 func Apply(config json.RawMessage, globals map[string]string) (json.RawMessage, error) {
@@ -101,7 +102,7 @@ func substituteString(s string, globals map[string]string) (string, bool) {
 			continue
 		}
 
-		// Placeholder: ${name} or ${env:NAME}
+		// Placeholder: ${global:NAME} or ${env:NAME}
 		if s[i] == '$' && i+1 < len(s) && s[i+1] == '{' {
 			end := findClosingBrace(s, i+2)
 			if end >= 0 {
@@ -117,12 +118,15 @@ func substituteString(s string, globals map[string]string) (string, bool) {
 							continue
 						}
 					}
-				} else if isValidVarName(name) {
-					if val, ok := globals[name]; ok {
-						b.WriteString(val)
-						changed = true
-						i = end + 1
-						continue
+				} else if strings.HasPrefix(name, "global:") {
+					globalKey := strings.TrimPrefix(name, "global:")
+					if isValidVarName(globalKey) {
+						if val, ok := globals[globalKey]; ok {
+							b.WriteString(val)
+							changed = true
+							i = end + 1
+							continue
+						}
 					}
 				}
 				// Unknown or invalid: keep original

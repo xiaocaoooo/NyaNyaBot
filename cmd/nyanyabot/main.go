@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -69,7 +73,9 @@ func main() {
 
 	// Start WebUI.
 	go func() {
-		logger.Info("webui listening", "addr", a.Web.Addr)
+		cfg := a.Store.Get()
+		webuiURL, autoLoginURL := buildWebUIURLs(a.Web.Addr, cfg.WebUI.Password)
+		logger.Info("webui listening", "addr", a.Web.Addr, "url", webuiURL, "auto_login_url", autoLoginURL)
 		err := a.Web.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("webui server error", "err", err)
@@ -92,4 +98,28 @@ func main() {
 	_ = a.Web.Shutdown(shutdownCtx)
 	_ = a.OB.Shutdown(shutdownCtx)
 	a.PH.Close()
+}
+
+func buildWebUIURLs(listenAddr string, password string) (string, string) {
+	hostPort := normalizeDisplayHostPort(listenAddr)
+	baseURL := fmt.Sprintf("http://%s/", hostPort)
+	autoLoginURL := fmt.Sprintf("http://%s/login/?password=%s", hostPort, url.QueryEscape(password))
+	return baseURL, autoLoginURL
+}
+
+func normalizeDisplayHostPort(listenAddr string) string {
+	listenAddr = strings.TrimSpace(listenAddr)
+	if listenAddr == "" {
+		return "127.0.0.1:3000"
+	}
+
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return listenAddr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }

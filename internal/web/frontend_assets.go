@@ -5,20 +5,19 @@ import (
 	"io/fs"
 )
 
-//go:embed assets/*
-var embeddedAssets embed.FS
+//go:embed all:frontend
+var embeddedFrontend embed.FS
 
-func assetsFS() fs.FS {
-	sub, err := fs.Sub(embeddedAssets, "assets")
+func frontendFS() fs.FS {
+	sub, err := fs.Sub(embeddedFrontend, "frontend")
 	if err != nil {
-		// If embedding is broken, return an empty fs; callers will 404.
 		return emptyFS{}
 	}
 	return sub
 }
 
 // emptyFS is a minimal fs.FS implementation that always returns fs.ErrNotExist.
-// Used as a safe fallback for embedded assets.
+// Used as a safe fallback when embedded static files are unavailable.
 type emptyFS struct{}
 
 func (emptyFS) Open(name string) (fs.File, error) {
