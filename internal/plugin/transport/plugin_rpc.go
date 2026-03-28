@@ -80,7 +80,7 @@ type PluginRPCClient struct {
 }
 
 // In plugin process we keep a global host RPC client, so plugin implementations
-// can call back into host APIs (CallOneBot / CallDependency).
+// can call back into host APIs (CallOneBot / CallDependency / GetStats).
 var hostClient *HostRPCClient
 
 func SetHost(c *HostRPCClient) { hostClient = c }
@@ -177,6 +177,16 @@ func (s *HostRPCServer) CallDependency(args CallDependencyArgs, resp *CallDepend
 	return nil
 }
 
+// GetStats 实现 HostRPCServer.GetStats
+func (s *HostRPCServer) GetStats(_ GetStatsArgs, resp *GetStatsReply) error {
+	r, err := s.Impl.GetStats(context.Background())
+	if err != nil {
+		return err
+	}
+	*resp = r
+	return nil
+}
+
 // HostRPCClient is used in the plugin process to call host services.
 type HostRPCClient struct {
 	client *rpc.Client
@@ -210,6 +220,16 @@ func (c *HostRPCClient) CallDependency(ctx context.Context, targetPluginID strin
 		return nil, resp.Error
 	}
 	return resp.Result, nil
+}
+
+// GetStats 实现 HostRPCClient.GetStats
+func (c *HostRPCClient) GetStats(ctx context.Context) (GetStatsReply, error) {
+	_ = ctx
+	var resp GetStatsReply
+	if err := c.client.Call("Plugin.GetStats", GetStatsArgs{}, &resp); err != nil {
+		return GetStatsReply{}, err
+	}
+	return resp, nil
 }
 
 // ===== go-plugin wiring =====

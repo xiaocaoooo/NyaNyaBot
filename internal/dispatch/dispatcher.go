@@ -3,19 +3,38 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 )
 
 type Dispatcher struct {
-	pm *plugin.Manager
+	pm     *plugin.Manager
+	logger *slog.Logger
+	stats  *stats.Stats
 }
 
 func New(pm *plugin.Manager) *Dispatcher {
-	return &Dispatcher{pm: pm}
+	return &Dispatcher{pm: pm, logger: slog.Default()}
+}
+
+func NewWithLogger(pm *plugin.Manager, logger *slog.Logger) *Dispatcher {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Dispatcher{pm: pm, logger: logger}
+}
+
+func NewWithLoggerAndStats(pm *plugin.Manager, logger *slog.Logger, s *stats.Stats) *Dispatcher {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Dispatcher{pm: pm, logger: logger, stats: s}
 }
 
 // Dispatch routes a raw OneBot event to plugins.
@@ -50,8 +69,32 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 		return
 	}
 
-	content := deriveContent(raw)
+	// 统计接收的消息数
+	if d.stats != nil {
+		d.stats.IncRecv()
+	}
+
+	// Log: sender + raw_message
+	groupID := getString(raw, "group_id")
+	senderID := getString(raw, "user_id")
 	rawMsg := getString(raw, "raw_message")
+
+	senderInfo := ""
+	var obj map[string]any
+	if json.Unmarshal(raw, &obj) == nil {
+		if sender, ok := obj["sender"].(map[string]any); ok {
+			senderInfo, _ = sender["nickname"].(string)
+		}
+	}
+
+	d.logger.Info("[dispatch] message received",
+		"sender", senderID,
+		"nickname", senderInfo,
+		"group_id", groupID,
+		"raw_message", rawMsg,
+	)
+
+	content := deriveContent(raw)
 
 	for pid, desc := range entries {
 		p, _, ok := d.pm.Get(pid)
@@ -65,21 +108,61 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				input = rawMsg
 			}
 			if input == "" {
+				d.logger.Info("[dispatch] skipping command (input empty)",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"match_raw", c.MatchRaw,
+					"content", content,
+					"rawMsg", rawMsg,
+				)
 				continue
 			}
+			d.logger.Info("[dispatch] trying command",
+				"plugin_id", pid,
+				"command_id", c.ID,
+				"pattern", c.Pattern,
+				"input", input,
+			)
 			re, err := regexp.Compile(c.Pattern)
 			if err != nil {
+				d.logger.Info("[dispatch] regex compile error",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"error", err,
+				)
 				continue
 			}
 			m := re.FindStringSubmatch(input)
 			if len(m) == 0 {
+				d.logger.Info("[dispatch] regex no match",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"input", input,
+					"pattern", c.Pattern,
+				)
 				continue
 			}
+			d.logger.Info("[dispatch] regex matched!",
+				"plugin_id", pid,
+				"command_id", c.ID,
+				"full_match", m[0],
+				"groups", m[1:],
+			)
 			cm := &plugin.CommandMatch{Full: m[0]}
 			if len(m) > 1 {
 				cm.Groups = append([]string(nil), m[1:]...)
 			}
-			_, _ = p.Handle(ctx, c.ID, raw, cm)
+			d.logger.Info("[dispatch] calling plugin Handle",
+				"plugin_id", pid,
+				"command_id", c.ID,
+			)
+			if _, err := p.Handle(ctx, c.ID, raw, cm); err != nil {
+				d.logger.Error("[dispatch] plugin Handle error",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"error", err,
+				)
+			}
 		}
 	}
 }
@@ -162,6 +245,12 @@ func getString(raw ob11.Event, key string) string {
 	if !ok {
 		return ""
 	}
-	s, _ := v.(string)
-	return s
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }

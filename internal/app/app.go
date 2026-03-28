@@ -12,7 +12,9 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/reversews"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
 	"github.com/xiaocaoooo/nyanyabot/internal/pluginhost"
+	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 	"github.com/xiaocaoooo/nyanyabot/internal/util"
 	"github.com/xiaocaoooo/nyanyabot/internal/web"
 )
@@ -25,6 +27,7 @@ type App struct {
 	Disp   *dispatch.Dispatcher
 	OB     *reversews.Server
 	Web    *http.Server
+	Stats  *stats.Stats
 }
 
 func New(ctx context.Context, logger *slog.Logger) (*App, error) {
@@ -42,10 +45,12 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	st := stats.New()
 	pm := plugin.NewManager()
-	disp := dispatch.New(pm)
+	disp := dispatch.NewWithLoggerAndStats(pm, logger, st)
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
+	ob.SetStats(st)
 	ob.SetEventHandler(func(evCtx context.Context, raw ob11.Event) {
 		_ = evCtx // per connection ctx
 		// Dispatch using app ctx so plugins can continue briefly even if connection ctx is canceled.
@@ -69,6 +74,14 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		return out
 	}, func(c context.Context, action string, params any) (ob11.APIResponse, error) {
 		return ob.Call(c, action, params)
+	}, func(ctx context.Context) (transport.GetStatsReply, error) {
+		snap := st.Snapshot()
+		return transport.GetStatsReply{
+			RecvCount: snap.RecvCount,
+			SentCount: snap.SentCount,
+			StartTime: snap.StartTime,
+			Uptime:    snap.Uptime,
+		}, nil
 	})
 
 	webSrv := web.New(store, pm)
@@ -86,5 +99,6 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		Disp:   disp,
 		OB:     ob,
 		Web:    httpSrv,
+		Stats:  st,
 	}, nil
 }

@@ -49,7 +49,7 @@ func main() {
 		)
 
 		for _, c := range p.Commands {
-			logger.Debug(
+			logger.Info(
 				"plugin command",
 				"plugin_id", p.PluginID,
 				"id", c.ID,
@@ -60,7 +60,7 @@ func main() {
 			)
 		}
 		for _, e := range p.Events {
-			logger.Debug(
+			logger.Info(
 				"plugin event",
 				"plugin_id", p.PluginID,
 				"id", e.ID,

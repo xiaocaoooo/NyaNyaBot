@@ -15,6 +15,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
@@ -65,8 +66,20 @@ type CallDependencyReply struct {
 	Error  *plugin.StructuredError `json:"error,omitempty"`
 }
 
+// GetStatsArgs 为空，保留以保持一致性
+type GetStatsArgs struct{}
+
+// GetStatsReply 返回运行统计信息
+type GetStatsReply struct {
+	RecvCount int64     `json:"recv_count"`
+	SentCount int64     `json:"sent_count"`
+	StartTime time.Time `json:"start_time"`
+	Uptime    string    `json:"uptime"`
+}
+
 // HostAPI is implemented by host and exposed to plugin.
 type HostAPI interface {
 	CallOneBot(ctx context.Context, action string, params any) (ob11.APIResponse, error)
 	CallDependency(ctx context.Context, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *plugin.StructuredError)
+	GetStats(ctx context.Context) (GetStatsReply, error)
 }

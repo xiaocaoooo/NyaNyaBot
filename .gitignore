@@ -1,2 +1,64 @@
+# === Go ===
+# 编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+# 测试二进制
+*.test
+# go build 输出
+/bin/
+# 覆盖率
+*.out
+*.prof
+# Go workspace
+go.work
+go.work.sum
+
+# === Go 插件 ===
+# 编译后的插件二进制
+plugins/
+
+# === WebUI (Next.js) ===
+webui/node_modules/
+webui/.next/
+webui/out/
+webui/.env.local
+webui/.env.development.local
+webui/.env.production.local
+webui/*.tsbuildinfo
+
+# === 配置与数据（可能含敏感信息）===
+data/config.json
+data/*.json
+*.env
+.env
+
+# === 编辑器 / IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+# VS Code
+*.code-workspace
+
+# === 操作系统 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === 日志 ===
+*.log
+logs/
+
+# === 临时文件 ===
+*.tmp
+*.bak
+*.cache
+/tmp/
+
 internal/web/frontend/
 apidocs/
+.narrafork/

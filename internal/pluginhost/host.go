@@ -37,22 +37,24 @@ type Host struct {
 	getGlobals      func() map[string]string
 
 	callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
+	getStats   func(ctx context.Context) (transport.GetStatsReply, error)
 }
 
-func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)) *Host {
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
 	if getPluginConfig == nil {
 		getPluginConfig = func() map[string]json.RawMessage { return nil }
 	}
 	if getGlobals == nil {
 		getGlobals = func() map[string]string { return nil }
 	}
-	return &Host{pm: pm, getPluginConfig: getPluginConfig, getGlobals: getGlobals, callOneBot: callOneBot}
+	return &Host{pm: pm, getPluginConfig: getPluginConfig, getGlobals: getGlobals, callOneBot: callOneBot, getStats: getStats}
 }
 
 type hostAPI struct {
 	callerPluginID string
 	call           func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
 	callDependency func(ctx context.Context, callerPluginID string, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *papi.StructuredError)
+	getStats       func(ctx context.Context) (transport.GetStatsReply, error)
 }
 
 func (h hostAPI) CallOneBot(ctx context.Context, action string, params any) (ob11.APIResponse, error) {
@@ -67,6 +69,13 @@ func (h hostAPI) CallDependency(ctx context.Context, targetPluginID string, meth
 		return nil, papi.NewStructuredError(papi.ErrorCodeInternal, "host dependency callback is not configured")
 	}
 	return h.callDependency(ctx, h.callerPluginID, targetPluginID, method, params)
+}
+
+func (h hostAPI) GetStats(ctx context.Context) (transport.GetStatsReply, error) {
+	if h.getStats == nil {
+		return transport.GetStatsReply{}, errors.New("host getStats callback is not configured")
+	}
+	return h.getStats(ctx)
 }
 
 func (h *Host) Close() {
@@ -145,7 +154,7 @@ func (h *Host) startExecutable(ctx context.Context, exePath string) (*loadedCand
 		abs = exePath
 	}
 
-	logger := hclog.New(&hclog.LoggerOptions{Name: "plugin", Level: hclog.Info})
+	logger := hclog.New(&hclog.LoggerOptions{Name: "plugin", Level: hclog.Info, Output: os.Stderr})
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  transport.Handshake(),
 		Plugins:          goplugin.PluginSet{transport.PluginName: &transport.Map{}},
@@ -268,6 +277,7 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 			callerPluginID: pluginID,
 			call:           h.callOneBot,
 			callDependency: h.callDependency,
+			getStats:       h.getStats,
 		}
 		if err := c.plugin.AttachHost(ctx, api); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %q attach host failed: %w", pluginID, err))

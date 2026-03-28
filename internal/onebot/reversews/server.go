@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
+	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 	"nhooyr.io/websocket"
 )
 
@@ -38,6 +39,7 @@ type Server struct {
 
 	mu      sync.RWMutex
 	session *session
+	stats   *stats.Stats
 }
 
 type session struct {
@@ -57,6 +59,10 @@ func New(addr string, logger *slog.Logger) *Server {
 
 func (s *Server) SetEventHandler(h EventHandler) {
 	s.handler = h
+}
+
+func (s *Server) SetStats(st *stats.Stats) {
+	s.stats = st
 }
 
 func (s *Server) Addr() string { return s.addr }
@@ -216,6 +222,13 @@ func (s *Server) Call(ctx context.Context, action string, params any) (ob11.APIR
 	case <-ctx.Done():
 		return ob11.APIResponse{}, ctx.Err()
 	case resp := <-ch:
+		// 统计发送成功的消息数
+		if s.stats != nil && resp.Status == "ok" {
+			switch action {
+			case "send_group_msg", "send_private_msg", "send_msg":
+				s.stats.IncSent()
+			}
+		}
 		return resp, nil
 	case <-time.After(30 * time.Second):
 		return ob11.APIResponse{}, errors.New("onebot call timeout")
