@@ -110,7 +110,7 @@ func buildWebUIURLs(listenAddr string, password string) (string, string) {
 func normalizeDisplayHostPort(listenAddr string) string {
 	listenAddr = strings.TrimSpace(listenAddr)
 	if listenAddr == "" {
-		return "127.0.0.1:3000"
+		return "0.0.0.0:3000"
 	}
 
 	host, port, err := net.SplitHostPort(listenAddr)

@@ -46,7 +46,7 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-		WebUI:   WebUIConfig{ListenAddr: "127.0.0.1:3000"},
+		WebUI:   WebUIConfig{ListenAddr: "0.0.0.0:3000"},
 		Globals: make(map[string]string),
 		Plugins: make(map[string]json.RawMessage),
 	}
@@ -153,7 +153,7 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		changed = true
 	}
 	if cfg.WebUI.ListenAddr == "" {
-		cfg.WebUI.ListenAddr = "127.0.0.1:3000"
+		cfg.WebUI.ListenAddr = "0.0.0.0:3000"
 		changed = true
 	}
 	if cfg.WebUI.Password == "" {

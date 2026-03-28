@@ -54,6 +54,23 @@
 - 使用 go-plugin 框架打包为可执行文件
 - 将插件复制到 `plugins/` 并在 Web UI 上安装
 
+## 插件配置
+
+- 插件在启动握手 `Descriptor` 中可声明 `config`（JSON Schema + default）。
+- 主程序在加载插件后立刻下发配置：`Configure(config_json)`。
+- 配置保存在 `data/config.json` 的 `plugins.{plugin_id}` 下，Web UI 后续可提供编辑入口。
+
+## 测试用示例插件
+
+### ConfigDump（用于验证“配置热更新”）
+
+- 源码：`cmd/nyanyabot-plugin-configdump/main.go`
+- 插件入口：`plugins/nyanyabot-plugin-configdump`（可执行脚本，便于直接被主程序扫描加载）
+- 指令：
+   - `/cfg`：返回当前运行中的配置 JSON
+   - `/cfg pretty`：返回格式化后的配置 JSON
+- 验证点：在 WebUI 的 `/plugins/external.configdump/config` 修改 `prefix` 后，无需重启，下一次 `/cfg` 即可看到变化
+
 ## 熔断与安全
 - 插件运行在隔离进程，避免崩溃影响主程序
 - 可以限制插件资源与权限

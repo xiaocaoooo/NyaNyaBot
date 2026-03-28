@@ -54,6 +54,10 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 - 监听的命令 `commands[]`
 - 监听的事件 `events[]`
 
+并且（新增）：
+
+- 可选的配置声明 `config`（见 §3.3）
+
 ### 3.2 监听器（Listener）必须声明的字段
 
 每个监听器必须声明（命令/事件都一样）：
@@ -77,6 +81,22 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 > - 全局唯一监听器键：`plugin_id + ":" + listener.id`。
 
 ---
+
+### 3.3 插件配置声明（Config Spec）
+
+插件可在启动握手时，随 Descriptor 一起声明自己的配置规范：
+
+- `config.schema`：JSON Schema（作为不透明 JSON，由 WebUI/主程序展示与校验；插件自行负责兜底）
+- `config.default`：默认配置（JSON 对象）
+- `config.version`：配置版本号（用于未来迁移）
+
+主程序在加载插件后，应当立刻调用 `Configure(config_json)` 将配置下发到插件。
+主程序也可以在配置更新时再次调用 `Configure`，让插件热更新配置。
+
+约定：
+
+- 配置存储在主程序的 `data/config.json` 内，以 `plugins.{plugin_id}` 为 key。
+- 若主程序没有找到某插件的配置，则下发 `{}`（插件应当和默认值合并）。
 
 ## 4. 建议的数据结构（Go 侧表示，设计稿）
 
@@ -220,6 +240,7 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 考虑到 go-plugin 跨进程通信，建议插件对外暴露 3 个核心 RPC：
 
 1. `Describe() -> PluginDescriptor`
+2. `Configure(config_json) -> void`
 2. `Handle(listener_id, event_raw_json, match?) -> HandleResult`
 3. `Shutdown()`
 

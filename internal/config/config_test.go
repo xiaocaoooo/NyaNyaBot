@@ -45,7 +45,7 @@ func TestLoadOrCreateDefaultBackfillsMissingWebUIPassword(t *testing.T) {
 
 	initial := []byte(`{
   "onebot": {"reverse_ws": {"listen_addr": "0.0.0.0:3001"}},
-  "webui": {"listen_addr": "127.0.0.1:3000"}
+  "webui": {"listen_addr": "0.0.0.0:3000"}
 }`)
 	if err := os.WriteFile(store.path, initial, 0o644); err != nil {
 		t.Fatalf("write initial config: %v", err)

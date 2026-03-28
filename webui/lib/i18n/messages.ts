@@ -58,7 +58,8 @@ const zhCN = {
   "dashboard.eventsCount": "事件 {{count}}",
 
   "config.title": "运行配置",
-  "config.subtitle": "地址配置会写入后端配置文件；全局变量会立即触发插件热更新。",
+  "config.subtitle":
+    "地址配置会写入后端配置文件；全局变量会立即触发插件热更新。",
   "config.languageTitle": "界面语言",
   "config.languageDesc": "默认会按设备语言自动选择，你也可以在这里手动切换。",
   "config.reload": "重新加载",
@@ -66,7 +67,7 @@ const zhCN = {
   "config.listenTitle": "基础监听地址",
   "config.webuiLabel": "WebUI 监听地址",
   "config.webuiAria": "WebUI 监听地址",
-  "config.webuiDesc": "默认值通常是 127.0.0.1:3000",
+  "config.webuiDesc": "默认值通常是 0.0.0.0:3000",
   "config.onebotLabel": "OneBot ReverseWS 监听地址",
   "config.onebotAria": "OneBot ReverseWS 监听地址",
   "config.onebotDesc": "默认值通常是 0.0.0.0:3001",
@@ -108,7 +109,8 @@ const zhCN = {
   "plugins.exportList": "公开函数",
   "plugins.none": "无",
   "plugins.configTitle": "插件配置",
-  "plugins.configDesc": "支持 Schema 表单与原始 JSON 两种编辑方式；保存时会做 schema 校验。",
+  "plugins.configDesc":
+    "支持 Schema 表单与原始 JSON 两种编辑方式；保存时会做 schema 校验。",
   "plugins.configEmptySelection": "选择插件后可编辑配置。",
   "plugins.configNoModel": "该插件未声明配置模型。",
   "plugins.loadingConfig": "读取插件配置中",
@@ -117,7 +119,8 @@ const zhCN = {
   "plugins.tabJson": "原始 JSON",
   "plugins.configJsonAria": "插件配置 JSON",
   "plugins.jsonHint": "可以自由编辑完整 JSON；保存时同样会进行 schema 校验。",
-  "plugins.schemaNoVisual": "该 schema 不包含可视化字段定义，已切换为原始 JSON 编辑。",
+  "plugins.schemaNoVisual":
+    "该 schema 不包含可视化字段定义，已切换为原始 JSON 编辑。",
   "plugins.saveConfig": "保存插件配置",
   "plugins.errorLoadList": "读取插件列表失败",
   "plugins.errorLoadConfig": "读取插件配置失败",
@@ -126,9 +129,12 @@ const zhCN = {
   "plugins.statusSaved": "插件配置已保存，并且后端已触发热更新。",
   "plugins.validationFailed": "Schema 校验失败：{{error}}",
   "plugins.globalHintTitle": "全局变量用法",
-  "plugins.globalHintLine1": "在任意字符串字段中可使用 ${global:VAR_NAME} 引用全局变量（在“配置”页维护）。",
-  "plugins.globalHintLine2": "也支持 ${env:VAR_NAME} 读取环境变量；使用 \\${global:VAR_NAME} 可保留字面量不替换。",
-  "plugins.globalHintLine3": "占位符仅会替换 JSON 的字符串值；未知变量会保持原样。保存插件配置或保存全局变量后，后端都会触发热更新。",
+  "plugins.globalHintLine1":
+    "在任意字符串字段中可使用 ${global:VAR_NAME} 引用全局变量（在“配置”页维护）。",
+  "plugins.globalHintLine2":
+    "也支持 ${env:VAR_NAME} 读取环境变量；使用 \\${global:VAR_NAME} 可保留字面量不替换。",
+  "plugins.globalHintLine3":
+    "占位符仅会替换 JSON 的字符串值；未知变量会保持原样。保存插件配置或保存全局变量后，后端都会触发热更新。",
   "plugins.schemaSelectPlaceholder": "请选择",
   "plugins.schemaEnabled": "已启用",
   "plugins.schemaDisabled": "未启用",
@@ -137,8 +143,9 @@ const zhCN = {
   "plugins.schemaInputText": "请输入",
   "plugins.schemaPatternPrefix": "需匹配: {{pattern}}",
   "plugins.schemaJsonAria": "{{title}} JSON",
-  "plugins.schemaJsonPlaceholder": "例如: {\"key\":\"value\"} 或 [1,2,3]",
-  "plugins.jsonPlaceholder": "{\"token\":\"${global:API_TOKEN}\",\"literal\":\"\\\\${global:NO_REPLACE}\"}",
+  "plugins.schemaJsonPlaceholder": '例如: {"key":"value"} 或 [1,2,3]',
+  "plugins.jsonPlaceholder":
+    '{"token":"${global:API_TOKEN}","literal":"\\\\${global:NO_REPLACE}"}',
 
   "plugins.validation.enum": "{{path}} 必须是枚举值之一",
   "plugins.validation.object": "{{path}} 必须是对象",
@@ -192,7 +199,8 @@ const enUS: MessageTable = {
   "login.hint": "The plain-text password is printed in console output.",
 
   "notFound.title": "Page not found",
-  "notFound.description": "This route is not included in the static export set. Please check the URL.",
+  "notFound.description":
+    "This route is not included in the static export set. Please check the URL.",
   "notFound.backHome": "Back to dashboard",
 
   "dashboard.title": "Console",
@@ -208,21 +216,24 @@ const enUS: MessageTable = {
   "dashboard.pluginsTitle": "Plugin overview",
   "dashboard.pluginsDesc": "Shows first 6 plugins",
   "dashboard.noPlugins": "No plugins detected.",
-  "dashboard.moreHint": "Go to the Plugins page for more details and online config.",
+  "dashboard.moreHint":
+    "Go to the Plugins page for more details and online config.",
   "dashboard.errorLoad": "Failed to load dashboard data",
   "dashboard.commandsCount": "Commands {{count}}",
   "dashboard.eventsCount": "Events {{count}}",
 
   "config.title": "Runtime config",
-  "config.subtitle": "Address settings are persisted to backend config files; globals trigger plugin hot-reload immediately.",
+  "config.subtitle":
+    "Address settings are persisted to backend config files; globals trigger plugin hot-reload immediately.",
   "config.languageTitle": "UI language",
-  "config.languageDesc": "Defaults to your device language. You can switch it manually here.",
+  "config.languageDesc":
+    "Defaults to your device language. You can switch it manually here.",
   "config.reload": "Reload",
   "config.loading": "Loading config",
   "config.listenTitle": "Listen addresses",
   "config.webuiLabel": "WebUI listen address",
   "config.webuiAria": "WebUI listen address",
-  "config.webuiDesc": "Default is usually 127.0.0.1:3000",
+  "config.webuiDesc": "Default is usually 0.0.0.0:3000",
   "config.onebotLabel": "OneBot ReverseWS listen address",
   "config.onebotAria": "OneBot ReverseWS listen address",
   "config.onebotDesc": "Default is usually 0.0.0.0:3001",
@@ -239,8 +250,10 @@ const enUS: MessageTable = {
   "config.errorLoad": "Failed to load config",
   "config.errorSaveBasic": "Failed to save base config",
   "config.errorSaveGlobals": "Failed to save globals",
-  "config.statusSaveBasic": "Base config saved. Backend has persisted it to data/config.json.",
-  "config.statusSaveGlobals": "Global variables saved and hot-reloaded immediately.",
+  "config.statusSaveBasic":
+    "Base config saved. Backend has persisted it to data/config.json.",
+  "config.statusSaveGlobals":
+    "Global variables saved and hot-reloaded immediately.",
 
   "plugins.title": "Plugins",
   "plugins.subtitle": "View loaded plugins and edit plugin configurations.",
@@ -264,7 +277,8 @@ const enUS: MessageTable = {
   "plugins.exportList": "Exported methods",
   "plugins.none": "None",
   "plugins.configTitle": "Plugin config",
-  "plugins.configDesc": "Supports Schema form and raw JSON editing. Schema validation runs on save.",
+  "plugins.configDesc":
+    "Supports Schema form and raw JSON editing. Schema validation runs on save.",
   "plugins.configEmptySelection": "Select a plugin to edit its config.",
   "plugins.configNoModel": "This plugin does not declare a config model.",
   "plugins.loadingConfig": "Loading plugin config",
@@ -272,19 +286,25 @@ const enUS: MessageTable = {
   "plugins.tabSchema": "Schema form",
   "plugins.tabJson": "Raw JSON",
   "plugins.configJsonAria": "Plugin config JSON",
-  "plugins.jsonHint": "You can edit the full JSON freely; schema validation still runs on save.",
-  "plugins.schemaNoVisual": "This schema has no visual fields; switched to raw JSON mode.",
+  "plugins.jsonHint":
+    "You can edit the full JSON freely; schema validation still runs on save.",
+  "plugins.schemaNoVisual":
+    "This schema has no visual fields; switched to raw JSON mode.",
   "plugins.saveConfig": "Save plugin config",
   "plugins.errorLoadList": "Failed to load plugin list",
   "plugins.errorLoadConfig": "Failed to load plugin config",
   "plugins.errorSaveConfig": "Failed to save plugin config",
   "plugins.errorConfigMustObject": "Plugin config must be a JSON object",
-  "plugins.statusSaved": "Plugin config saved, and backend hot-reload has been triggered.",
+  "plugins.statusSaved":
+    "Plugin config saved, and backend hot-reload has been triggered.",
   "plugins.validationFailed": "Schema validation failed: {{error}}",
   "plugins.globalHintTitle": "Global variable usage",
-  "plugins.globalHintLine1": "Use ${global:VAR_NAME} in any string field to reference globals (managed on the Config page).",
-  "plugins.globalHintLine2": "You can also use ${env:VAR_NAME} for environment variables; use \\${global:VAR_NAME} to keep a literal placeholder.",
-  "plugins.globalHintLine3": "Only JSON string values are substituted. Unknown variables remain unchanged. Saving plugin config or globals triggers hot-reload.",
+  "plugins.globalHintLine1":
+    "Use ${global:VAR_NAME} in any string field to reference globals (managed on the Config page).",
+  "plugins.globalHintLine2":
+    "You can also use ${env:VAR_NAME} for environment variables; use \\${global:VAR_NAME} to keep a literal placeholder.",
+  "plugins.globalHintLine3":
+    "Only JSON string values are substituted. Unknown variables remain unchanged. Saving plugin config or globals triggers hot-reload.",
   "plugins.schemaSelectPlaceholder": "Please select",
   "plugins.schemaEnabled": "Enabled",
   "plugins.schemaDisabled": "Disabled",
@@ -293,8 +313,9 @@ const enUS: MessageTable = {
   "plugins.schemaInputText": "Enter text",
   "plugins.schemaPatternPrefix": "Must match: {{pattern}}",
   "plugins.schemaJsonAria": "{{title}} JSON",
-  "plugins.schemaJsonPlaceholder": "Example: {\"key\":\"value\"} or [1,2,3]",
-  "plugins.jsonPlaceholder": "{\"token\":\"${global:API_TOKEN}\",\"literal\":\"\\\\${global:NO_REPLACE}\"}",
+  "plugins.schemaJsonPlaceholder": 'Example: {"key":"value"} or [1,2,3]',
+  "plugins.jsonPlaceholder":
+    '{"token":"${global:API_TOKEN}","literal":"\\\\${global:NO_REPLACE}"}',
 
   "plugins.validation.enum": "{{path}} must be one of enum values",
   "plugins.validation.object": "{{path}} must be an object",
@@ -339,7 +360,8 @@ const zhTW: MessageTable = {
   "login.errorGeneric": "登入失敗，請稍後再試。",
   "login.hint": "密碼明文會輸出在控制台。",
   "notFound.title": "頁面不存在",
-  "notFound.description": "此路由不在目前的靜態導出集合中，請檢查網址是否正確。",
+  "notFound.description":
+    "此路由不在目前的靜態導出集合中，請檢查網址是否正確。",
   "notFound.backHome": "返回儀表板",
   "dashboard.title": "控制台",
   "dashboard.subtitle": "查看外掛狀態與核心設定。",
@@ -367,7 +389,7 @@ const zhTW: MessageTable = {
   "config.listenTitle": "基礎監聽地址",
   "config.webuiLabel": "WebUI 監聽地址",
   "config.webuiAria": "WebUI 監聽地址",
-  "config.webuiDesc": "預設值通常是 127.0.0.1:3000",
+  "config.webuiDesc": "預設值通常是 0.0.0.0:3000",
   "config.onebotLabel": "OneBot ReverseWS 監聽地址",
   "config.onebotAria": "OneBot ReverseWS 監聽地址",
   "config.onebotDesc": "預設值通常是 0.0.0.0:3001",
@@ -408,7 +430,8 @@ const zhTW: MessageTable = {
   "plugins.exportList": "公開函式",
   "plugins.none": "無",
   "plugins.configTitle": "外掛設定",
-  "plugins.configDesc": "支援 Schema 表單與原始 JSON 兩種編輯方式；儲存時會做 schema 校驗。",
+  "plugins.configDesc":
+    "支援 Schema 表單與原始 JSON 兩種編輯方式；儲存時會做 schema 校驗。",
   "plugins.configEmptySelection": "選擇外掛後可編輯設定。",
   "plugins.configNoModel": "該外掛未宣告設定模型。",
   "plugins.loadingConfig": "讀取外掛設定中",
@@ -417,7 +440,8 @@ const zhTW: MessageTable = {
   "plugins.tabJson": "原始 JSON",
   "plugins.configJsonAria": "外掛設定 JSON",
   "plugins.jsonHint": "可自由編輯完整 JSON；儲存時同樣會進行 schema 校驗。",
-  "plugins.schemaNoVisual": "該 schema 不包含可視化欄位定義，已切換為原始 JSON 編輯。",
+  "plugins.schemaNoVisual":
+    "該 schema 不包含可視化欄位定義，已切換為原始 JSON 編輯。",
   "plugins.saveConfig": "儲存外掛設定",
   "plugins.errorLoadList": "讀取外掛列表失敗",
   "plugins.errorLoadConfig": "讀取外掛設定失敗",
@@ -426,9 +450,12 @@ const zhTW: MessageTable = {
   "plugins.statusSaved": "外掛設定已儲存，且後端已觸發熱更新。",
   "plugins.validationFailed": "Schema 校驗失敗：{{error}}",
   "plugins.globalHintTitle": "全域變數用法",
-  "plugins.globalHintLine1": "在任意字串欄位中可使用 ${global:VAR_NAME} 引用全域變數（在「設定」頁維護）。",
-  "plugins.globalHintLine2": "也支援 ${env:VAR_NAME} 讀取環境變數；使用 \\${global:VAR_NAME} 可保留字面量不替換。",
-  "plugins.globalHintLine3": "佔位符僅會替換 JSON 的字串值；未知變數會保持原樣。儲存外掛設定或全域變數後，後端都會觸發熱更新。",
+  "plugins.globalHintLine1":
+    "在任意字串欄位中可使用 ${global:VAR_NAME} 引用全域變數（在「設定」頁維護）。",
+  "plugins.globalHintLine2":
+    "也支援 ${env:VAR_NAME} 讀取環境變數；使用 \\${global:VAR_NAME} 可保留字面量不替換。",
+  "plugins.globalHintLine3":
+    "佔位符僅會替換 JSON 的字串值；未知變數會保持原樣。儲存外掛設定或全域變數後，後端都會觸發熱更新。",
   "plugins.schemaSelectPlaceholder": "請選擇",
   "plugins.schemaEnabled": "已啟用",
   "plugins.schemaDisabled": "未啟用",
@@ -437,8 +464,9 @@ const zhTW: MessageTable = {
   "plugins.schemaInputText": "請輸入",
   "plugins.schemaPatternPrefix": "需匹配: {{pattern}}",
   "plugins.schemaJsonAria": "{{title}} JSON",
-  "plugins.schemaJsonPlaceholder": "例如: {\"key\":\"value\"} 或 [1,2,3]",
-  "plugins.jsonPlaceholder": "{\"token\":\"${global:API_TOKEN}\",\"literal\":\"\\\\${global:NO_REPLACE}\"}",
+  "plugins.schemaJsonPlaceholder": '例如: {"key":"value"} 或 [1,2,3]',
+  "plugins.jsonPlaceholder":
+    '{"token":"${global:API_TOKEN}","literal":"\\\\${global:NO_REPLACE}"}',
   "plugins.validation.enum": "{{path}} 必須是枚舉值之一",
   "plugins.validation.object": "{{path}} 必須是物件",
   "plugins.validation.required": "{{path}} 為必填項",
@@ -471,7 +499,8 @@ const jaJP: MessageTable = {
   "theme.toLight": "ライトモードに切り替える",
   "theme.toDark": "ダークモードに切り替える",
   "login.title": "WebUI にログイン",
-  "login.subtitle": "コンソールと API にアクセスするにはパスワードを入力してください。",
+  "login.subtitle":
+    "コンソールと API にアクセスするにはパスワードを入力してください。",
   "login.passwordLabel": "ログインパスワード",
   "login.passwordAria": "ログインパスワード",
   "login.passwordPlaceholder": "ログインパスワードを入力",
@@ -479,10 +508,12 @@ const jaJP: MessageTable = {
   "login.submitting": "ログイン中...",
   "login.autoSigningIn": "URL パラメータを使って自動ログインしています...",
   "login.errorInvalid": "パスワードが正しくありません。再試行してください。",
-  "login.errorGeneric": "ログインに失敗しました。しばらくしてから再試行してください。",
+  "login.errorGeneric":
+    "ログインに失敗しました。しばらくしてから再試行してください。",
   "login.hint": "平文パスワードはコンソールに出力されます。",
   "notFound.title": "ページが見つかりません",
-  "notFound.description": "このルートは現在の静的エクスポートに含まれていません。URL を確認してください。",
+  "notFound.description":
+    "このルートは現在の静的エクスポートに含まれていません。URL を確認してください。",
   "notFound.backHome": "ダッシュボードに戻る",
   "dashboard.title": "コンソール",
   "dashboard.subtitle": "プラグイン状態と主要設定を確認できます。",
@@ -497,20 +528,23 @@ const jaJP: MessageTable = {
   "dashboard.pluginsTitle": "プラグイン概要",
   "dashboard.pluginsDesc": "先頭 6 件のプラグインを表示",
   "dashboard.noPlugins": "プラグインが見つかりません。",
-  "dashboard.moreHint": "詳細やオンライン設定は「Plugins」ページで確認できます。",
+  "dashboard.moreHint":
+    "詳細やオンライン設定は「Plugins」ページで確認できます。",
   "dashboard.errorLoad": "ダッシュボードデータの読み込みに失敗しました",
   "dashboard.commandsCount": "コマンド {{count}}",
   "dashboard.eventsCount": "イベント {{count}}",
   "config.title": "実行設定",
-  "config.subtitle": "アドレス設定はバックエンド設定ファイルに保存され、グローバル変数は即時にプラグインへホットリロードされます。",
+  "config.subtitle":
+    "アドレス設定はバックエンド設定ファイルに保存され、グローバル変数は即時にプラグインへホットリロードされます。",
   "config.languageTitle": "表示言語",
-  "config.languageDesc": "既定では端末の言語が使われます。ここで手動切替も可能です。",
+  "config.languageDesc":
+    "既定では端末の言語が使われます。ここで手動切替も可能です。",
   "config.reload": "再読み込み",
   "config.loading": "設定を読み込み中",
   "config.listenTitle": "リッスンアドレス",
   "config.webuiLabel": "WebUI リッスンアドレス",
   "config.webuiAria": "WebUI リッスンアドレス",
-  "config.webuiDesc": "通常の既定値は 127.0.0.1:3000",
+  "config.webuiDesc": "通常の既定値は 0.0.0.0:3000",
   "config.onebotLabel": "OneBot ReverseWS リッスンアドレス",
   "config.onebotAria": "OneBot ReverseWS リッスンアドレス",
   "config.onebotDesc": "通常の既定値は 0.0.0.0:3001",
@@ -527,8 +561,10 @@ const jaJP: MessageTable = {
   "config.errorLoad": "設定の読み込みに失敗しました",
   "config.errorSaveBasic": "基本設定の保存に失敗しました",
   "config.errorSaveGlobals": "グローバル変数の保存に失敗しました",
-  "config.statusSaveBasic": "基本設定を保存しました。バックエンドは data/config.json に永続化しました。",
-  "config.statusSaveGlobals": "グローバル変数を保存し、即時にホットリロードしました。",
+  "config.statusSaveBasic":
+    "基本設定を保存しました。バックエンドは data/config.json に永続化しました。",
+  "config.statusSaveGlobals":
+    "グローバル変数を保存し、即時にホットリロードしました。",
   "plugins.title": "プラグイン",
   "plugins.subtitle": "読み込み済みプラグインの確認と設定編集ができます。",
   "plugins.refresh": "プラグイン一覧を更新",
@@ -551,7 +587,8 @@ const jaJP: MessageTable = {
   "plugins.exportList": "公開メソッド",
   "plugins.none": "なし",
   "plugins.configTitle": "プラグイン設定",
-  "plugins.configDesc": "Schema フォームと生 JSON の 2 つの編集方式に対応し、保存時に schema 検証を行います。",
+  "plugins.configDesc":
+    "Schema フォームと生 JSON の 2 つの編集方式に対応し、保存時に schema 検証を行います。",
   "plugins.configEmptySelection": "プラグインを選択すると設定を編集できます。",
   "plugins.configNoModel": "このプラグインは設定モデルを定義していません。",
   "plugins.loadingConfig": "プラグイン設定を読み込み中",
@@ -559,19 +596,26 @@ const jaJP: MessageTable = {
   "plugins.tabSchema": "Schema フォーム",
   "plugins.tabJson": "生 JSON",
   "plugins.configJsonAria": "プラグイン設定 JSON",
-  "plugins.jsonHint": "完全な JSON を自由に編集できます。保存時は schema 検証も実行されます。",
-  "plugins.schemaNoVisual": "この schema には可視化フィールド定義がないため、生 JSON 編集に切り替えました。",
+  "plugins.jsonHint":
+    "完全な JSON を自由に編集できます。保存時は schema 検証も実行されます。",
+  "plugins.schemaNoVisual":
+    "この schema には可視化フィールド定義がないため、生 JSON 編集に切り替えました。",
   "plugins.saveConfig": "プラグイン設定を保存",
   "plugins.errorLoadList": "プラグイン一覧の読み込みに失敗しました",
   "plugins.errorLoadConfig": "プラグイン設定の読み込みに失敗しました",
   "plugins.errorSaveConfig": "プラグイン設定の保存に失敗しました",
-  "plugins.errorConfigMustObject": "プラグイン設定は JSON オブジェクトである必要があります",
-  "plugins.statusSaved": "プラグイン設定を保存し、バックエンドのホットリロードを実行しました。",
+  "plugins.errorConfigMustObject":
+    "プラグイン設定は JSON オブジェクトである必要があります",
+  "plugins.statusSaved":
+    "プラグイン設定を保存し、バックエンドのホットリロードを実行しました。",
   "plugins.validationFailed": "Schema 検証に失敗しました: {{error}}",
   "plugins.globalHintTitle": "グローバル変数の使い方",
-  "plugins.globalHintLine1": "任意の文字列フィールドで ${global:VAR_NAME} を使うとグローバル変数を参照できます（Config ページで管理）。",
-  "plugins.globalHintLine2": "${env:VAR_NAME} で環境変数も参照できます。\\${global:VAR_NAME} を使うと文字列として保持されます。",
-  "plugins.globalHintLine3": "置換対象は JSON の文字列値のみです。不明な変数はそのまま残ります。プラグイン設定やグローバル変数の保存時にホットリロードされます。",
+  "plugins.globalHintLine1":
+    "任意の文字列フィールドで ${global:VAR_NAME} を使うとグローバル変数を参照できます（Config ページで管理）。",
+  "plugins.globalHintLine2":
+    "${env:VAR_NAME} で環境変数も参照できます。\\${global:VAR_NAME} を使うと文字列として保持されます。",
+  "plugins.globalHintLine3":
+    "置換対象は JSON の文字列値のみです。不明な変数はそのまま残ります。プラグイン設定やグローバル変数の保存時にホットリロードされます。",
   "plugins.schemaSelectPlaceholder": "選択してください",
   "plugins.schemaEnabled": "有効",
   "plugins.schemaDisabled": "無効",
@@ -580,17 +624,22 @@ const jaJP: MessageTable = {
   "plugins.schemaInputText": "入力してください",
   "plugins.schemaPatternPrefix": "一致条件: {{pattern}}",
   "plugins.schemaJsonAria": "{{title}} JSON",
-  "plugins.schemaJsonPlaceholder": "例: {\"key\":\"value\"} または [1,2,3]",
-  "plugins.jsonPlaceholder": "{\"token\":\"${global:API_TOKEN}\",\"literal\":\"\\\\${global:NO_REPLACE}\"}",
+  "plugins.schemaJsonPlaceholder": '例: {"key":"value"} または [1,2,3]',
+  "plugins.jsonPlaceholder":
+    '{"token":"${global:API_TOKEN}","literal":"\\\\${global:NO_REPLACE}"}',
   "plugins.validation.enum": "{{path}} は列挙値のいずれかである必要があります",
   "plugins.validation.object": "{{path}} はオブジェクトである必要があります",
   "plugins.validation.required": "{{path}} は必須です",
-  "plugins.validation.additional": "{{path}} に追加フィールドは許可されていません",
+  "plugins.validation.additional":
+    "{{path}} に追加フィールドは許可されていません",
   "plugins.validation.array": "{{path}} は配列である必要があります",
   "plugins.validation.string": "{{path}} は文字列である必要があります",
-  "plugins.validation.minLength": "{{path}} の長さは {{value}} 以上である必要があります",
-  "plugins.validation.maxLength": "{{path}} の長さは {{value}} 以下である必要があります",
-  "plugins.validation.pattern": "{{path}} は pattern に一致しません: {{pattern}}",
+  "plugins.validation.minLength":
+    "{{path}} の長さは {{value}} 以上である必要があります",
+  "plugins.validation.maxLength":
+    "{{path}} の長さは {{value}} 以下である必要があります",
+  "plugins.validation.pattern":
+    "{{path}} は pattern に一致しません: {{pattern}}",
   "plugins.validation.patternInvalid": "{{path}} の schema.pattern が不正です",
   "plugins.validation.number": "{{path}} は数値である必要があります",
   "plugins.validation.min": "{{path}} は {{value}} 以上である必要があります",
