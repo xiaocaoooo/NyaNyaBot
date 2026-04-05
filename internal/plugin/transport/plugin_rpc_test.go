@@ -73,6 +73,11 @@ func (h *rpcStubHost) CallDependency(ctx context.Context, targetPluginID string,
 	}
 }
 
+func (h *rpcStubHost) GetStats(ctx context.Context) (GetStatsReply, error) {
+	_ = ctx
+	return GetStatsReply{}, nil
+}
+
 func TestPluginInvokeStructuredErrorRoundTrip(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()

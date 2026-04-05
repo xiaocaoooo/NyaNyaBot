@@ -3,6 +3,7 @@ const backendOrigin = process.env.NEXT_PUBLIC_BACKEND_ORIGIN ?? "http://127.0.0.
 const isDevelopment = process.env.NODE_ENV === "development";
 
 const nextConfig = {
+  distDir: isDevelopment ? ".next-dev" : ".next",
   output: "export",
   trailingSlash: true,
   images: {

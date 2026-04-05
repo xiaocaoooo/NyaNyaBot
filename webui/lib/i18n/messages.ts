@@ -107,6 +107,8 @@ const zhCN = {
   "plugins.listenerEvents": "事件监听",
   "plugins.dependencyList": "依赖插件",
   "plugins.exportList": "公开函数",
+  "plugins.pluginSwitchLabel": "启用插件",
+  "plugins.pluginDisabledHint": "插件已关闭，下面的监听器开关当前仅展示状态。",
   "plugins.none": "无",
   "plugins.configTitle": "插件配置",
   "plugins.configDesc":
@@ -127,6 +129,8 @@ const zhCN = {
   "plugins.errorSaveConfig": "保存插件配置失败",
   "plugins.errorConfigMustObject": "插件配置必须是 JSON 对象",
   "plugins.statusSaved": "插件配置已保存，并且后端已触发热更新。",
+  "plugins.switchStatusSaved": "插件开关已保存。",
+  "plugins.switchErrorSave": "保存插件开关失败",
   "plugins.validationFailed": "Schema 校验失败：{{error}}",
   "plugins.globalHintTitle": "全局变量用法",
   "plugins.globalHintLine1":
@@ -275,6 +279,8 @@ const enUS: MessageTable = {
   "plugins.listenerEvents": "Event listeners",
   "plugins.dependencyList": "Dependencies",
   "plugins.exportList": "Exported methods",
+  "plugins.pluginSwitchLabel": "Enable plugin",
+  "plugins.pluginDisabledHint": "This plugin is disabled, so the listener switches below are currently read-only.",
   "plugins.none": "None",
   "plugins.configTitle": "Plugin config",
   "plugins.configDesc":
@@ -297,6 +303,8 @@ const enUS: MessageTable = {
   "plugins.errorConfigMustObject": "Plugin config must be a JSON object",
   "plugins.statusSaved":
     "Plugin config saved, and backend hot-reload has been triggered.",
+  "plugins.switchStatusSaved": "Plugin switches saved.",
+  "plugins.switchErrorSave": "Failed to save plugin switches",
   "plugins.validationFailed": "Schema validation failed: {{error}}",
   "plugins.globalHintTitle": "Global variable usage",
   "plugins.globalHintLine1":
@@ -428,6 +436,8 @@ const zhTW: MessageTable = {
   "plugins.listenerEvents": "事件監聽",
   "plugins.dependencyList": "依賴外掛",
   "plugins.exportList": "公開函式",
+  "plugins.pluginSwitchLabel": "啟用外掛",
+  "plugins.pluginDisabledHint": "外掛已關閉，下面的監聽器開關目前僅展示狀態。",
   "plugins.none": "無",
   "plugins.configTitle": "外掛設定",
   "plugins.configDesc":
@@ -448,6 +458,8 @@ const zhTW: MessageTable = {
   "plugins.errorSaveConfig": "儲存外掛設定失敗",
   "plugins.errorConfigMustObject": "外掛設定必須是 JSON 物件",
   "plugins.statusSaved": "外掛設定已儲存，且後端已觸發熱更新。",
+  "plugins.switchStatusSaved": "外掛開關已儲存。",
+  "plugins.switchErrorSave": "儲存外掛開關失敗",
   "plugins.validationFailed": "Schema 校驗失敗：{{error}}",
   "plugins.globalHintTitle": "全域變數用法",
   "plugins.globalHintLine1":
@@ -585,6 +597,8 @@ const jaJP: MessageTable = {
   "plugins.listenerEvents": "イベントリスナー",
   "plugins.dependencyList": "依存プラグイン",
   "plugins.exportList": "公開メソッド",
+  "plugins.pluginSwitchLabel": "プラグインを有効化",
+  "plugins.pluginDisabledHint": "プラグインが無効のため、下のリスナースイッチは現在の状態表示のみです。",
   "plugins.none": "なし",
   "plugins.configTitle": "プラグイン設定",
   "plugins.configDesc":
@@ -608,6 +622,8 @@ const jaJP: MessageTable = {
     "プラグイン設定は JSON オブジェクトである必要があります",
   "plugins.statusSaved":
     "プラグイン設定を保存し、バックエンドのホットリロードを実行しました。",
+  "plugins.switchStatusSaved": "プラグインスイッチを保存しました。",
+  "plugins.switchErrorSave": "プラグインスイッチの保存に失敗しました",
   "plugins.validationFailed": "Schema 検証に失敗しました: {{error}}",
   "plugins.globalHintTitle": "グローバル変数の使い方",
   "plugins.globalHintLine1":

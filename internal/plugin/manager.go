@@ -13,8 +13,9 @@ import (
 //
 // Note: This is a minimal manager (no hot reload yet).
 type Manager struct {
-	mu      sync.RWMutex
-	plugins map[string]*pluginEntry // key = plugin_id
+	mu              sync.RWMutex
+	plugins         map[string]*pluginEntry // key = plugin_id
+	isPluginEnabled func(pluginID string) bool
 }
 
 type pluginEntry struct {
@@ -26,6 +27,12 @@ type pluginEntry struct {
 
 func NewManager() *Manager {
 	return &Manager{plugins: make(map[string]*pluginEntry)}
+}
+
+func (m *Manager) SetPluginEnabledChecker(fn func(pluginID string) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.isPluginEnabled = fn
 }
 
 func (m *Manager) Register(ctx context.Context, p Plugin) (Descriptor, error) {
@@ -103,16 +110,30 @@ func (m *Manager) CallDependency(ctx context.Context, callerPluginID string, tar
 	m.mu.RLock()
 	callerEntry, callerOK := m.plugins[callerPluginID]
 	targetEntry, targetOK := m.plugins[targetPluginID]
+	checker := m.isPluginEnabled
 	m.mu.RUnlock()
+
+	isPluginEnabled := func(pluginID string) bool {
+		if checker == nil {
+			return true
+		}
+		return checker(pluginID)
+	}
 
 	if !callerOK {
 		return nil, NewStructuredError(ErrorCodeForbidden, "caller plugin is not registered")
+	}
+	if !isPluginEnabled(callerPluginID) {
+		return nil, NewStructuredError(ErrorCodeForbidden, fmt.Sprintf("plugin %q is disabled", callerPluginID))
 	}
 	if _, ok := callerEntry.depSet[targetPluginID]; !ok {
 		return nil, NewStructuredError(ErrorCodeForbidden, fmt.Sprintf("plugin %q does not depend on %q", callerPluginID, targetPluginID))
 	}
 	if !targetOK {
 		return nil, NewStructuredError(ErrorCodeNotFound, fmt.Sprintf("target plugin %q not found", targetPluginID))
+	}
+	if !isPluginEnabled(targetPluginID) {
+		return nil, NewStructuredError(ErrorCodeForbidden, fmt.Sprintf("plugin %q is disabled", targetPluginID))
 	}
 	if _, ok := targetEntry.exportSet[method]; !ok {
 		return nil, NewStructuredError(ErrorCodeNotFound, fmt.Sprintf("method %q is not exported by %q", method, targetPluginID))

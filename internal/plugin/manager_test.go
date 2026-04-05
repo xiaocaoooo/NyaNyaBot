@@ -103,6 +103,42 @@ func TestCallDependencyRejectsUndeclaredDependency(t *testing.T) {
 	}
 }
 
+func TestCallDependencyRejectsDisabledPlugins(t *testing.T) {
+	cases := []struct {
+		name       string
+		disabledID string
+	}{
+		{name: "disabled caller", disabledID: "external.caller"},
+		{name: "disabled target", disabledID: "external.target"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewManager()
+			m.SetPluginEnabledChecker(func(pluginID string) bool {
+				return pluginID != tc.disabledID
+			})
+			caller := &stubPlugin{desc: Descriptor{PluginID: "external.caller", Dependencies: []string{"external.target"}}}
+			target := &stubPlugin{desc: Descriptor{PluginID: "external.target", Exports: []ExportSpec{{Name: "target.echo"}}}}
+
+			if _, err := m.Register(context.Background(), caller); err != nil {
+				t.Fatalf("register caller: %v", err)
+			}
+			if _, err := m.Register(context.Background(), target); err != nil {
+				t.Fatalf("register target: %v", err)
+			}
+
+			_, serr := m.CallDependency(context.Background(), "external.caller", "external.target", "target.echo", json.RawMessage(`{}`))
+			if serr == nil {
+				t.Fatalf("expected structured error")
+			}
+			if serr.Code != ErrorCodeForbidden {
+				t.Fatalf("expected FORBIDDEN, got %#v", serr)
+			}
+		})
+	}
+}
+
 func TestCallDependencyNotFoundCases(t *testing.T) {
 	m := NewManager()
 	caller := &stubPlugin{desc: Descriptor{PluginID: "external.caller", Dependencies: []string{"external.target", "external.missing"}, Exports: []ExportSpec{}}}

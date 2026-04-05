@@ -11,7 +11,7 @@ import { AppInput } from "@/components/ui/input";
 import { StatusMessage } from "@/components/ui/status-message";
 import { AppTextarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api/client";
-import type { PluginDescriptor } from "@/lib/api/types";
+import type { PluginListItem } from "@/lib/api/types";
 
 type EditorMode = "schema" | "json";
 type JSONSchema = {
@@ -440,7 +440,7 @@ function GlobalVariableUsageHint({ t }: { t: TranslateFn }) {
 
 export function PluginsScreen() {
   const { t } = useI18n();
-  const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
+  const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [pluginConfigText, setPluginConfigText] = useState("{}");
   const [schemaConfig, setSchemaConfig] = useState<Record<string, unknown>>({});
@@ -449,16 +449,21 @@ export function PluginsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [savingSwitches, setSavingSwitches] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const [switchStatus, setSwitchStatus] = useState<string | null>(null);
 
   const selectedPlugin = useMemo(
     () => plugins.find((plugin) => plugin.plugin_id === selectedId) ?? null,
     [plugins, selectedId],
   );
+  const selectedPluginId = selectedPlugin?.plugin_id ?? "";
+  const selectedPluginConfig = selectedPlugin?.config;
 
-  const schemaObject = useMemo(() => normalizeSchema(selectedPlugin?.config?.schema), [selectedPlugin]);
+  const schemaObject = useMemo(() => normalizeSchema(selectedPluginConfig?.schema), [selectedPluginConfig]);
   const canUseSchemaEditor = useMemo(
     () => Boolean(schemaObject && schemaObject.properties && Object.keys(schemaObject.properties).length > 0),
     [schemaObject],
@@ -467,13 +472,18 @@ export function PluginsScreen() {
   const loadPlugins = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setSwitchError(null);
 
     try {
       const data = await apiClient.fetchPlugins();
       setPlugins(data);
-      if (data.length > 0) {
-        setSelectedId((current) => current || data[0].plugin_id);
-      }
+      setSelectedId((current) => {
+        if (data.length === 0) {
+          return "";
+        }
+
+        return data.some((plugin: PluginListItem) => plugin.plugin_id === current) ? current : data[0].plugin_id;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("plugins.errorLoadList"));
     } finally {
@@ -485,13 +495,13 @@ export function PluginsScreen() {
     void loadPlugins();
   }, [loadPlugins]);
 
-  const loadPluginConfig = useCallback(async (plugin: PluginDescriptor) => {
+  const loadPluginConfig = useCallback(async (pluginId: string, pluginConfig?: PluginListItem["config"]) => {
     setLoadingConfig(true);
     setError(null);
 
     try {
-      const response = await apiClient.fetchPluginConfig(plugin.plugin_id);
-      const defaults = normalizeConfigObject(plugin.config?.default);
+      const response = await apiClient.fetchPluginConfig(pluginId);
+      const defaults = normalizeConfigObject(pluginConfig?.default);
       const currentConfig = normalizeConfigObject(response.config);
       const mergedConfig = deepMerge(defaults, currentConfig);
 
@@ -508,15 +518,74 @@ export function PluginsScreen() {
   }, [canUseSchemaEditor, t]);
 
   useEffect(() => {
-    if (!selectedPlugin?.config) {
+    if (!selectedPluginConfig) {
       setSchemaConfig({});
       setPluginConfigText("{}");
       setEditorMode("json");
       return;
     }
 
-    void loadPluginConfig(selectedPlugin);
-  }, [loadPluginConfig, selectedPlugin]);
+    void loadPluginConfig(selectedPluginId, selectedPluginConfig);
+  }, [loadPluginConfig, selectedPluginConfig, selectedPluginId]);
+
+  const updateLocalPluginState = useCallback((pluginId: string, nextState: PluginListItem["state"]) => {
+    setPlugins((current) =>
+      current.map((plugin) => (plugin.plugin_id === pluginId ? { ...plugin, state: nextState } : plugin)),
+    );
+  }, []);
+
+  const savePluginSwitches = useCallback(
+    async (pluginId: string, payload: Parameters<typeof apiClient.updatePluginSwitches>[1]) => {
+      setSavingSwitches(true);
+      setSwitchError(null);
+      setSwitchStatus(null);
+
+      try {
+        const response = await apiClient.updatePluginSwitches(pluginId, payload);
+        updateLocalPluginState(pluginId, response.state);
+        setSwitchStatus(t("plugins.switchStatusSaved"));
+      } catch (err) {
+        setSwitchError(err instanceof Error ? err.message : t("plugins.switchErrorSave"));
+      } finally {
+        setSavingSwitches(false);
+      }
+    },
+    [t, updateLocalPluginState],
+  );
+
+  const handlePluginToggle = useCallback(
+    async (nextEnabled: boolean) => {
+      if (!selectedPlugin) {
+        return;
+      }
+      await savePluginSwitches(selectedPlugin.plugin_id, { enabled: nextEnabled });
+    },
+    [savePluginSwitches, selectedPlugin],
+  );
+
+  const handleCommandToggle = useCallback(
+    async (listenerId: string, nextEnabled: boolean) => {
+      if (!selectedPlugin) {
+        return;
+      }
+      await savePluginSwitches(selectedPlugin.plugin_id, {
+        commands: { [listenerId]: nextEnabled },
+      });
+    },
+    [savePluginSwitches, selectedPlugin],
+  );
+
+  const handleEventToggle = useCallback(
+    async (listenerId: string, nextEnabled: boolean) => {
+      if (!selectedPlugin) {
+        return;
+      }
+      await savePluginSwitches(selectedPlugin.plugin_id, {
+        events: { [listenerId]: nextEnabled },
+      });
+    },
+    [savePluginSwitches, selectedPlugin],
+  );
 
   const handleModeChange = (key: Key) => {
     const nextMode = String(key) as EditorMode;
@@ -634,10 +703,19 @@ export function PluginsScreen() {
                           onClick={() => {
                             setSelectedId(plugin.plugin_id);
                             setStatus(null);
+                            setSwitchStatus(null);
+                            setSwitchError(null);
                           }}
                         >
                           <p className="font-medium text-text">{plugin.name}</p>
                           <p className="text-xs text-muted">{plugin.plugin_id}</p>
+                          {!plugin.state.enabled ? (
+                            <div className="mt-2">
+                              <Chip color="warning" radius="sm" size="sm" variant="flat">
+                                {t("plugins.schemaDisabled")}
+                              </Chip>
+                            </div>
+                          ) : null}
                         </button>
                       </li>
                     );
@@ -658,29 +736,61 @@ export function PluginsScreen() {
                   <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">{t("plugins.detailsEmpty")}</p>
                 ) : (
                   <>
-                    <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-surface-elevated/50 p-4">
-                      <div>
-                        <p className="text-lg font-semibold text-text">{selectedPlugin.name}</p>
-                        <p className="text-sm text-muted">
-                          {selectedPlugin.plugin_id} · v{selectedPlugin.version} · {selectedPlugin.author}
-                        </p>
-                        <p className="mt-2 text-sm text-text/90">{selectedPlugin.description || t("plugins.descriptionFallback")}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-4 rounded-lg border border-border/70 bg-surface-elevated/50 p-4">
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-lg font-semibold text-text">{selectedPlugin.name}</p>
+                          <p className="text-sm text-muted">
+                            {selectedPlugin.plugin_id} · v{selectedPlugin.version} · {selectedPlugin.author}
+                          </p>
+                          <p className="mt-2 text-sm text-text/90">{selectedPlugin.description || t("plugins.descriptionFallback")}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Chip radius="sm" variant="flat">
+                            {t("plugins.commands", { count: selectedPlugin.commands.length })}
+                          </Chip>
+                          <Chip radius="sm" variant="flat">
+                            {t("plugins.events", { count: selectedPlugin.events.length })}
+                          </Chip>
+                          <Chip radius="sm" variant="flat">
+                            {t("plugins.dependencies", { count: selectedPlugin.dependencies.length })}
+                          </Chip>
+                          <Chip radius="sm" variant="flat">
+                            {t("plugins.exports", { count: selectedPlugin.exports.length })}
+                          </Chip>
+                          <Chip
+                            color={selectedPlugin.state.enabled ? "success" : "warning"}
+                            radius="sm"
+                            variant="flat"
+                          >
+                            {selectedPlugin.state.enabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                          </Chip>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Chip radius="sm" variant="flat">
-                          {t("plugins.commands", { count: selectedPlugin.commands.length })}
-                        </Chip>
-                        <Chip radius="sm" variant="flat">
-                          {t("plugins.events", { count: selectedPlugin.events.length })}
-                        </Chip>
-                        <Chip radius="sm" variant="flat">
-                          {t("plugins.dependencies", { count: selectedPlugin.dependencies.length })}
-                        </Chip>
-                        <Chip radius="sm" variant="flat">
-                          {t("plugins.exports", { count: selectedPlugin.exports.length })}
-                        </Chip>
+                      <div className="min-w-[220px] rounded-lg border border-border/70 bg-surface/80 p-3">
+                        <p className="text-sm font-medium text-text">{t("plugins.pluginSwitchLabel")}</p>
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <span className="text-xs text-muted">
+                            {selectedPlugin.state.enabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                          </span>
+                          <Switch
+                            aria-label={t("plugins.pluginSwitchLabel")}
+                            isDisabled={savingSwitches}
+                            isSelected={selectedPlugin.state.enabled}
+                            size="sm"
+                            onValueChange={handlePluginToggle}
+                          />
+                        </div>
                       </div>
                     </div>
+
+                    {switchStatus ? <StatusMessage tone="success">{switchStatus}</StatusMessage> : null}
+                    {switchError ? <StatusMessage tone="error">{switchError}</StatusMessage> : null}
+                    {!selectedPlugin.state.enabled ? (
+                      <p className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-muted">
+                        {t("plugins.pluginDisabledHint")}
+                      </p>
+                    ) : null}
 
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
@@ -689,12 +799,34 @@ export function PluginsScreen() {
                           {selectedPlugin.commands.length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.commands.slice(0, 6).map((command) => (
-                              <li key={command.id}>
-                                <p className="font-medium text-text">{command.name}</p>
-                                <p className="font-mono text-xs">{command.pattern}</p>
-                              </li>
-                            ))
+                            selectedPlugin.commands.slice(0, 6).map((command) => {
+                              const commandEnabled = selectedPlugin.state.commands[command.id] ?? true;
+                              return (
+                                <li
+                                  key={command.id}
+                                  className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-surface/70 p-3"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-text">{command.name}</p>
+                                    <p className="font-mono text-xs break-all">{command.pattern}</p>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2">
+                                    <Switch
+                                      aria-label={`${command.name} ${t("plugins.listenerCommands")}`}
+                                      isDisabled={savingSwitches || !selectedPlugin.state.enabled}
+                                      isSelected={commandEnabled}
+                                      size="sm"
+                                      onValueChange={(next) => {
+                                        void handleCommandToggle(command.id, next);
+                                      }}
+                                    />
+                                    <Chip radius="sm" size="sm" variant="flat">
+                                      {commandEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                                    </Chip>
+                                  </div>
+                                </li>
+                              );
+                            })
                           )}
                         </ul>
                       </div>
@@ -705,12 +837,34 @@ export function PluginsScreen() {
                           {selectedPlugin.events.length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.events.slice(0, 6).map((event) => (
-                              <li key={event.id}>
-                                <p className="font-medium text-text">{event.name}</p>
-                                <p className="font-mono text-xs">{event.event}</p>
-                              </li>
-                            ))
+                            selectedPlugin.events.slice(0, 6).map((event) => {
+                              const eventEnabled = selectedPlugin.state.events[event.id] ?? true;
+                              return (
+                                <li
+                                  key={event.id}
+                                  className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-surface/70 p-3"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-text">{event.name}</p>
+                                    <p className="font-mono text-xs break-all">{event.event}</p>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2">
+                                    <Switch
+                                      aria-label={`${event.name} ${t("plugins.listenerEvents")}`}
+                                      isDisabled={savingSwitches || !selectedPlugin.state.enabled}
+                                      isSelected={eventEnabled}
+                                      size="sm"
+                                      onValueChange={(next) => {
+                                        void handleEventToggle(event.id, next);
+                                      }}
+                                    />
+                                    <Chip radius="sm" size="sm" variant="flat">
+                                      {eventEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                                    </Chip>
+                                  </div>
+                                </li>
+                              );
+                            })
                           )}
                         </ul>
                       </div>

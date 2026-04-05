@@ -47,7 +47,11 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	st := stats.New()
 	pm := plugin.NewManager()
+	pm.SetPluginEnabledChecker(func(pluginID string) bool {
+		return store.Get().IsPluginEnabled(pluginID)
+	})
 	disp := dispatch.NewWithLoggerAndStats(pm, logger, st)
+	disp.SetConfigProvider(store.Get)
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
 	ob.SetStats(st)

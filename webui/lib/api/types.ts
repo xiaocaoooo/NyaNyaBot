@@ -66,6 +66,16 @@ export interface PluginDescriptor {
   events: EventListener[];
 }
 
+export interface PluginStateView {
+  enabled: boolean;
+  commands: Record<string, boolean>;
+  events: Record<string, boolean>;
+}
+
+export interface PluginListItem extends PluginDescriptor {
+  state: PluginStateView;
+}
+
 export interface GlobalsResponse {
   globals: Record<string, string>;
 }
@@ -81,6 +91,17 @@ export interface UpdateGlobalsPayload {
 
 export interface UpdatePluginConfigPayload {
   config: Record<string, unknown>;
+}
+
+export interface UpdatePluginSwitchesPayload {
+  enabled?: boolean;
+  commands?: Record<string, boolean>;
+  events?: Record<string, boolean>;
+}
+
+export interface UpdatePluginSwitchesResponse {
+  ok: boolean;
+  state: PluginStateView;
 }
 
 export interface APIError {

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/util"
@@ -24,6 +26,15 @@ type AppConfig struct {
 	// To keep a literal placeholder, use \${global:name} (will become ${global:name} without substitution).
 	Globals map[string]string          `json:"globals,omitempty"`
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
+	// PluginControls stores host-side runtime switches for plugins and listeners.
+	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
+}
+
+// PluginControl stores host-side enable/disable state.
+type PluginControl struct {
+	Disabled         bool     `json:"disabled,omitempty"`
+	DisabledCommands []string `json:"disabled_commands,omitempty"`
+	DisabledEvents   []string `json:"disabled_events,omitempty"`
 }
 
 type OneBotConfig struct {
@@ -46,9 +57,10 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-		WebUI:   WebUIConfig{ListenAddr: "0.0.0.0:3000"},
-		Globals: make(map[string]string),
-		Plugins: make(map[string]json.RawMessage),
+		WebUI:          WebUIConfig{ListenAddr: "0.0.0.0:3000"},
+		Globals:        make(map[string]string),
+		Plugins:        make(map[string]json.RawMessage),
+		PluginControls: make(map[string]PluginControl),
 	}
 }
 
@@ -172,7 +184,140 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		cfg.Plugins = make(map[string]json.RawMessage)
 		changed = true
 	}
+	if cfg.PluginControls == nil {
+		cfg.PluginControls = make(map[string]PluginControl)
+		changed = true
+	}
+	normalizedControls := normalizePluginControls(cfg.PluginControls)
+	if !pluginControlsEqual(cfg.PluginControls, normalizedControls) {
+		cfg.PluginControls = normalizedControls
+		changed = true
+	}
 	return changed, nil
+}
+
+func (c AppConfig) IsPluginEnabled(pluginID string) bool {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return true
+	}
+	control, ok := c.PluginControls[pluginID]
+	if !ok {
+		return true
+	}
+	return !control.Disabled
+}
+
+func (c AppConfig) IsCommandEnabled(pluginID string, listenerID string) bool {
+	listenerID = strings.TrimSpace(listenerID)
+	if listenerID == "" {
+		return true
+	}
+	control, ok := c.PluginControls[strings.TrimSpace(pluginID)]
+	if !ok {
+		return true
+	}
+	for _, disabledID := range control.DisabledCommands {
+		if disabledID == listenerID {
+			return false
+		}
+	}
+	return true
+}
+
+func (c AppConfig) IsEventEnabled(pluginID string, listenerID string) bool {
+	listenerID = strings.TrimSpace(listenerID)
+	if listenerID == "" {
+		return true
+	}
+	control, ok := c.PluginControls[strings.TrimSpace(pluginID)]
+	if !ok {
+		return true
+	}
+	for _, disabledID := range control.DisabledEvents {
+		if disabledID == listenerID {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizePluginControls(in map[string]PluginControl) map[string]PluginControl {
+	if in == nil {
+		return map[string]PluginControl{}
+	}
+	out := make(map[string]PluginControl, len(in))
+	for pluginID, control := range in {
+		pluginID = strings.TrimSpace(pluginID)
+		if pluginID == "" {
+			continue
+		}
+		control.DisabledCommands = normalizeStringSlice(control.DisabledCommands)
+		control.DisabledEvents = normalizeStringSlice(control.DisabledEvents)
+		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 {
+			continue
+		}
+		out[pluginID] = control
+	}
+	return out
+}
+
+func normalizeStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginControl) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for pluginID, leftControl := range left {
+		rightControl, ok := right[pluginID]
+		if !ok {
+			return false
+		}
+		if leftControl.Disabled != rightControl.Disabled {
+			return false
+		}
+		if !stringSlicesEqual(leftControl.DisabledCommands, rightControl.DisabledCommands) {
+			return false
+		}
+		if !stringSlicesEqual(leftControl.DisabledEvents, rightControl.DisabledEvents) {
+			return false
+		}
+	}
+	return true
+}
+
+func stringSlicesEqual(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func generateWebUIPassword(length int) (string, error) {

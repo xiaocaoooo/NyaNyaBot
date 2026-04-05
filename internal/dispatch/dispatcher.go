@@ -8,15 +8,17 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 )
 
 type Dispatcher struct {
-	pm     *plugin.Manager
-	logger *slog.Logger
-	stats  *stats.Stats
+	pm        *plugin.Manager
+	logger    *slog.Logger
+	stats     *stats.Stats
+	getConfig func() config.AppConfig
 }
 
 func New(pm *plugin.Manager) *Dispatcher {
@@ -37,11 +39,20 @@ func NewWithLoggerAndStats(pm *plugin.Manager, logger *slog.Logger, s *stats.Sta
 	return &Dispatcher{pm: pm, logger: logger, stats: s}
 }
 
+func (d *Dispatcher) SetConfigProvider(fn func() config.AppConfig) {
+	d.getConfig = fn
+}
+
 // Dispatch routes a raw OneBot event to plugins.
 func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	entries := d.pm.Entries()
 	if len(entries) == 0 {
 		return
+	}
+
+	cfg := config.AppConfig{}
+	if d.getConfig != nil {
+		cfg = d.getConfig()
 	}
 
 	postType := getString(raw, "post_type")
@@ -52,11 +63,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	// 1) event listeners
 	eventKey, eventKeyFull := computeEventKeys(raw)
 	for pid, desc := range entries {
+		if !cfg.IsPluginEnabled(pid) {
+			continue
+		}
 		p, _, ok := d.pm.Get(pid)
 		if !ok {
 			continue
 		}
 		for _, l := range desc.Events {
+			if !cfg.IsEventEnabled(pid, l.ID) {
+				continue
+			}
 			if matchEvent(l.Event, eventKey, eventKeyFull) {
 				// no match info
 				_, _ = p.Handle(ctx, l.ID, raw, nil)
@@ -97,12 +114,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	content := deriveContent(raw)
 
 	for pid, desc := range entries {
+		if !cfg.IsPluginEnabled(pid) {
+			continue
+		}
 		p, _, ok := d.pm.Get(pid)
 		if !ok {
 			continue
 		}
 
 		for _, c := range desc.Commands {
+			if !cfg.IsCommandEnabled(pid, c.ID) {
+				continue
+			}
 			input := content
 			if c.MatchRaw {
 				input = rawMsg
