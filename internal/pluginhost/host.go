@@ -154,7 +154,8 @@ func (h *Host) startExecutable(ctx context.Context, exePath string) (*loadedCand
 		abs = exePath
 	}
 
-	logger := hclog.New(&hclog.LoggerOptions{Name: "plugin", Level: hclog.Info, Output: os.Stderr})
+	// go-plugin 会把无法解析级别的插件 stderr 行降级为 Debug；这里保持 Debug，避免业务日志被静默丢掉。
+	logger := hclog.New(&hclog.LoggerOptions{Name: "plugin", Level: hclog.Debug, Output: os.Stderr})
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  transport.Handshake(),
 		Plugins:          goplugin.PluginSet{transport.PluginName: &transport.Map{}},
