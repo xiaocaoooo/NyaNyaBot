@@ -112,6 +112,15 @@ func (s *Scheduler) addCronJob(pluginID string, c plugin.CronListener) {
 		// 检查 cron 是否被禁用
 		if s.getConfig != nil {
 			cfg := s.getConfig()
+			// 1. 检查插件整体是否被禁用
+			if !cfg.IsPluginEnabled(pluginID) {
+				s.logger.Debug("plugin disabled, skipping cron job",
+					"plugin_id", pluginID,
+					"cron_id", c.ID,
+				)
+				return
+			}
+			// 2. 检查特定 cron 是否被禁用
 			if !cfg.IsCronEnabled(pluginID, c.ID) {
 				s.logger.Debug("cron job disabled, skipping",
 					"plugin_id", pluginID,
