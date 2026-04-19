@@ -23,15 +23,17 @@ type pluginConfigPatch struct {
 }
 
 type pluginSwitchPatch struct {
-	Enabled  *bool           `json:"enabled,omitempty"`
-	Commands map[string]bool `json:"commands,omitempty"`
-	Events   map[string]bool `json:"events,omitempty"`
+	Enabled       *bool           `json:"enabled,omitempty"`
+	Commands      map[string]bool `json:"commands,omitempty"`
+	Events        map[string]bool `json:"events,omitempty"`
+	CommandPrefix *string         `json:"prefix,omitempty"`
 }
 
 type pluginStateView struct {
-	Enabled  bool            `json:"enabled"`
-	Commands map[string]bool `json:"commands"`
-	Events   map[string]bool `json:"events"`
+	Enabled       bool            `json:"enabled"`
+	Commands      map[string]bool `json:"commands"`
+	Events        map[string]bool `json:"events"`
+	CommandPrefix string          `json:"command_prefix"`
 }
 
 type pluginListItem struct {
@@ -92,6 +94,9 @@ func buildPluginState(cfg config.AppConfig, desc plugin.Descriptor) pluginStateV
 		Commands: make(map[string]bool, len(desc.Commands)),
 		Events:   make(map[string]bool, len(desc.Events)),
 	}
+	if control, ok := cfg.PluginControls[desc.PluginID]; ok {
+		state.CommandPrefix = control.CommandPrefix
+	}
 	for _, command := range desc.Commands {
 		state.Commands[command.ID] = cfg.IsCommandEnabled(desc.PluginID, command.ID)
 	}
@@ -104,6 +109,9 @@ func buildPluginState(cfg config.AppConfig, desc plugin.Descriptor) pluginStateV
 func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatch) config.PluginControl {
 	if patch.Enabled != nil {
 		control.Disabled = !*patch.Enabled
+	}
+	if patch.CommandPrefix != nil {
+		control.CommandPrefix = strings.TrimSpace(*patch.CommandPrefix)
 	}
 	if patch.Commands != nil {
 		control.DisabledCommands = applyListenerSwitches(control.DisabledCommands, patch.Commands)
@@ -456,6 +464,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				ListenAddr *string `json:"listen_addr"`
 				Password   *string `json:"password"`
 			} `json:"webui"`
+			MessagePrefix *string `json:"message_prefix"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -473,6 +482,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if patch.WebUI != nil && patch.WebUI.Password != nil {
 				c.WebUI.Password = strings.TrimSpace(*patch.WebUI.Password)
+			}
+			if patch.MessagePrefix != nil {
+				c.MessagePrefix = strings.TrimSpace(*patch.MessagePrefix)
 			}
 		})
 		if err != nil {

@@ -15,15 +15,19 @@ import (
 )
 
 const defaultReverseWSListen = "0.0.0.0:3001"
+const defaultMessagePrefix = `^/(?P<content>.+)$`
 
 // AppConfig is persisted under data/config.json.
 // All user-generated config must live inside the data directory.
 type AppConfig struct {
 	OneBot OneBotConfig `json:"onebot"`
 	WebUI  WebUIConfig  `json:"webui"`
+	// MessagePrefix is applied before command pattern matching.
+	// It must be a RE2 regular expression.
+	MessagePrefix string `json:"message_prefix,omitempty"`
 	// Globals are user-defined variables for config templating.
 	// They can be referenced in plugin config strings as ${global:name}.
-	// To keep a literal placeholder, use \${global:name} (will become ${global:name} without substitution).
+	// To keep a literal placeholder, use \\${global:name} (will become ${global:name} without substitution).
 	Globals map[string]string          `json:"globals,omitempty"`
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 	// PluginControls stores host-side runtime switches for plugins and listeners.
@@ -35,6 +39,8 @@ type PluginControl struct {
 	Disabled         bool     `json:"disabled,omitempty"`
 	DisabledCommands []string `json:"disabled_commands,omitempty"`
 	DisabledEvents   []string `json:"disabled_events,omitempty"`
+	// CommandPrefix overrides AppConfig.MessagePrefix for this plugin.
+	CommandPrefix string `json:"command_prefix,omitempty"`
 }
 
 type OneBotConfig struct {
@@ -58,6 +64,7 @@ func Default() AppConfig {
 			},
 		},
 		WebUI:          WebUIConfig{ListenAddr: "0.0.0.0:3000"},
+		MessagePrefix:  defaultMessagePrefix,
 		Globals:        make(map[string]string),
 		Plugins:        make(map[string]json.RawMessage),
 		PluginControls: make(map[string]PluginControl),
@@ -176,6 +183,10 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		cfg.WebUI.Password = password
 		changed = true
 	}
+	if cfg.MessagePrefix == "" {
+		cfg.MessagePrefix = defaultMessagePrefix
+		changed = true
+	}
 	if cfg.Globals == nil {
 		cfg.Globals = make(map[string]string)
 		changed = true
@@ -254,7 +265,8 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		}
 		control.DisabledCommands = normalizeStringSlice(control.DisabledCommands)
 		control.DisabledEvents = normalizeStringSlice(control.DisabledEvents)
-		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 {
+		control.CommandPrefix = strings.TrimSpace(control.CommandPrefix)
+		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 && control.CommandPrefix == "" {
 			continue
 		}
 		out[pluginID] = control
@@ -296,6 +308,9 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 			return false
 		}
 		if leftControl.Disabled != rightControl.Disabled {
+			return false
+		}
+		if leftControl.CommandPrefix != strings.TrimSpace(rightControl.CommandPrefix) {
 			return false
 		}
 		if !stringSlicesEqual(leftControl.DisabledCommands, rightControl.DisabledCommands) {

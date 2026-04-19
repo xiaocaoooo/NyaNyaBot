@@ -139,3 +139,68 @@ func TestDispatchSkipsDisabledCommandListener(t *testing.T) {
 		t.Fatalf("unexpected handled commands: %#v", p.handled)
 	}
 }
+
+func TestDispatchStripsGlobalPrefix(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
+	}}
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+	}, p)
+
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
+		t.Fatalf("expected global prefix stripped and command matched, got %#v", p.handled)
+	}
+}
+
+func TestDispatchStripsPluginPrefix(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
+	}}
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+		PluginControls: map[string]config.PluginControl{
+			"external.commands": {CommandPrefix: `^#(?P<content>.+)$`},
+		},
+	}, p)
+
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"#ping","message":"#ping"}`))
+	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
+		t.Fatalf("expected plugin prefix override to match, got %#v", p.handled)
+	}
+}
+
+func TestDispatchSkipsCommandWithoutPrefixMatch(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
+	}}
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+	}, p)
+
+	// Without matching prefix, command should be skipped
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"ping","message":"ping"}`))
+	if len(p.handled) != 0 {
+		t.Fatalf("expected command without prefix to be skipped in strict mode, got %#v", p.handled)
+	}
+}
+
+func TestDispatchMatchesCommandWithPrefix(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
+	}}
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+	}, p)
+
+	// With matching prefix, command should match
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
+		t.Fatalf("expected command with prefix to match, got %#v", p.handled)
+	}
+}

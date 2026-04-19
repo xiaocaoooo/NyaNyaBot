@@ -122,6 +122,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			continue
 		}
 
+		prefixPattern := cfg.MessagePrefix
+		if control, ok := cfg.PluginControls[pid]; ok && strings.TrimSpace(control.CommandPrefix) != "" {
+			prefixPattern = control.CommandPrefix
+		}
 		for _, c := range desc.Commands {
 			if !cfg.IsCommandEnabled(pid, c.ID) {
 				continue
@@ -140,6 +144,26 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				)
 				continue
 			}
+			strippedInput, matched, err := stripMessagePrefix(input, prefixPattern)
+			if err != nil {
+				d.logger.Info("[dispatch] prefix regex compile error",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"message_prefix", prefixPattern,
+					"error", err,
+				)
+				continue
+			}
+			if !matched {
+				d.logger.Info("[dispatch] prefix not matched, skipping command",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"message_prefix", prefixPattern,
+					"input", input,
+				)
+				continue
+			}
+			input = strippedInput
 			d.logger.Info("[dispatch] trying command",
 				"plugin_id", pid,
 				"command_id", c.ID,
@@ -257,6 +281,28 @@ func deriveContent(raw ob11.Event) string {
 	default:
 		return ""
 	}
+}
+
+func stripMessagePrefix(msg string, pattern string) (string, bool, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return msg, false, err
+	}
+	loc := re.FindStringSubmatchIndex(msg)
+	if loc == nil || len(loc) < 2 || loc[0] != 0 {
+		return msg, false, nil
+	}
+	m := re.FindStringSubmatch(msg)
+	if len(m) == 0 {
+		return msg, false, nil
+	}
+	if idx := re.SubexpIndex("content"); idx >= 0 && idx < len(m) && m[idx] != "" {
+		return m[idx], true, nil
+	}
+	if len(m) >= 2 {
+		return strings.TrimPrefix(msg, m[0]), true, nil
+	}
+	return msg[loc[1]:], true, nil
 }
 
 func getString(raw ob11.Event, key string) string {

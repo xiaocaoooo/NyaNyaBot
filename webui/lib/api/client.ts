@@ -92,6 +92,7 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     enabled: state?.enabled ?? true,
     commands: state?.commands ?? {},
     events: state?.events ?? {},
+    command_prefix: state?.command_prefix ?? "",
   };
 }
 

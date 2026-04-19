@@ -123,11 +123,23 @@ func TestHandlePluginsReturnsMergedState(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 plugin, got %d", len(items))
 	}
+	item := items[0]
+	if item.State.Enabled {
+		t.Fatalf("expected plugin to be disabled")
+	}
+	if !item.State.Commands["cmd.one"] {
+		t.Fatalf("expected cmd.one enabled, got %#v", item.State.Commands)
+	}
+	if !item.State.Events["evt.one"] {
+		t.Fatalf("expected evt.one enabled, got %#v", item.State.Events)
+	}
+
+	if item.State.CommandPrefix != "" {
+		t.Fatalf("expected command prefix to be empty when omitted, got %q", item.State.CommandPrefix)
+	}
+
 	if items[0].PluginID != "external.demo" {
 		t.Fatalf("unexpected plugin id: %s", items[0].PluginID)
-	}
-	if items[0].State.Enabled {
-		t.Fatal("expected plugin to be disabled")
 	}
 	expectedCommands := map[string]bool{"cmd.one": true, "cmd.two": false}
 	if !reflect.DeepEqual(items[0].State.Commands, expectedCommands) {
@@ -148,7 +160,7 @@ func TestHandlePluginSwitchesPersistsState(t *testing.T) {
 	}})
 	session := loginTestSession(t, handler, store)
 
-	body := bytes.NewBufferString(`{"enabled":false,"commands":{"cmd.one":false},"events":{"evt.one":false}}`)
+	body := bytes.NewBufferString(`{"enabled":false,"commands":{"cmd.one":false},"events":{"evt.one":false},"prefix":"/@"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/plugins/external.demo/switches", body)
 	req.AddCookie(session)
 	rec := httptest.NewRecorder()
@@ -172,6 +184,9 @@ func TestHandlePluginSwitchesPersistsState(t *testing.T) {
 	}
 	if response.State.Events["evt.one"] {
 		t.Fatalf("expected evt.one disabled, got %#v", response.State.Events)
+	}
+	if response.State.CommandPrefix != "/@" {
+		t.Fatalf("expected command prefix in response: %#v", response.State.CommandPrefix)
 	}
 
 	cfg := store.Get()

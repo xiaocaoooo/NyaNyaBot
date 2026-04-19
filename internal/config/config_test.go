@@ -91,7 +91,10 @@ func TestLoadOrCreateDefaultNormalizesPluginControls(t *testing.T) {
       "disabled_events": ["evt.b", "evt.a", "evt.a"]
     },
     "external.empty": {},
-    "": {"disabled": true}
+    "": {"disabled": true},
+    "external.prefix": {
+      "command_prefix": " /plugin"
+    }
   }
 }`)
 	if err := os.WriteFile(store.path, initial, 0o644); err != nil {
@@ -115,6 +118,9 @@ func TestLoadOrCreateDefaultNormalizesPluginControls(t *testing.T) {
 	}
 	if _, ok := cfg.PluginControls["external.empty"]; ok {
 		t.Fatalf("expected empty plugin control to be removed: %#v", cfg.PluginControls)
+	}
+	if cfg.PluginControls["external.prefix"].CommandPrefix != "/plugin" {
+		t.Fatalf("expected plugin command prefix to be normalized, got %#v", cfg.PluginControls)
 	}
 	if cfg.IsPluginEnabled("external.demo") != true {
 		t.Fatal("expected plugin to stay enabled when disabled flag is false")

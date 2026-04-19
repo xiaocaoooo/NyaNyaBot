@@ -9,6 +9,7 @@ export interface AppConfig {
   };
   globals?: Record<string, string>;
   plugins?: Record<string, unknown>;
+  message_prefix?: string;
 }
 
 export interface ConfigPatch {
@@ -20,6 +21,7 @@ export interface ConfigPatch {
   webui?: {
     listen_addr?: string;
   };
+  message_prefix?: string;
 }
 
 export interface PluginConfigSpec {
@@ -70,6 +72,7 @@ export interface PluginStateView {
   enabled: boolean;
   commands: Record<string, boolean>;
   events: Record<string, boolean>;
+  command_prefix?: string;
 }
 
 export interface PluginListItem extends PluginDescriptor {
@@ -97,6 +100,7 @@ export interface UpdatePluginSwitchesPayload {
   enabled?: boolean;
   commands?: Record<string, boolean>;
   events?: Record<string, boolean>;
+  prefix?: string;
 }
 
 export interface UpdatePluginSwitchesResponse {

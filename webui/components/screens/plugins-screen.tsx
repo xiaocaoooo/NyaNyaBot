@@ -445,6 +445,7 @@ export function PluginsScreen() {
   const [pluginConfigText, setPluginConfigText] = useState("{}");
   const [schemaConfig, setSchemaConfig] = useState<Record<string, unknown>>({});
   const [editorMode, setEditorMode] = useState<EditorMode>("json");
+  const [pluginPrefix, setPluginPrefix] = useState<string>("");
 
   const [loading, setLoading] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -468,6 +469,15 @@ export function PluginsScreen() {
     () => Boolean(schemaObject && schemaObject.properties && Object.keys(schemaObject.properties).length > 0),
     [schemaObject],
   );
+
+  // Keep local prefix input in sync with selected plugin's state from API
+  useEffect(() => {
+    if (selectedPlugin) {
+      setPluginPrefix(selectedPlugin.state.command_prefix ?? "");
+    } else {
+      setPluginPrefix("");
+    }
+  }, [selectedPlugin]);
 
   const loadPlugins = useCallback(async () => {
     setLoading(true);
@@ -793,6 +803,31 @@ export function PluginsScreen() {
                     ) : null}
 
                     <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3 sm:col-span-2">
+                        <p className="text-sm font-medium text-text">{t("plugins.prefixLabel")}</p>
+                        <p className="text-xs text-muted mb-2">{t("plugins.prefixDesc")}</p>
+                        <AppInput
+                          aria-label={t("plugins.prefixLabel")}
+                          placeholder={t("plugins.prefixPlaceholder")}
+                          value={pluginPrefix}
+                          onValueChange={setPluginPrefix}
+                        />
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <AppButton
+                            size="sm"
+                            isDisabled={savingSwitches}
+                            onPress={async () => {
+                              if (!selectedPlugin) return;
+                              await savePluginSwitches(selectedPlugin.plugin_id, {
+                                prefix: pluginPrefix.trim() || undefined,
+                              });
+                            }}
+                          >
+                            {t("plugins.saveConfig")}
+                          </AppButton>
+                        </div>
+                      </div>
+
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.listenerCommands")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">

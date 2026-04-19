@@ -31,11 +31,13 @@ export function ConfigScreen() {
   const { t } = useI18n();
   const [webuiAddr, setWebuiAddr] = useState("");
   const [reverseWSAddr, setReverseWSAddr] = useState("");
+  const [messagePrefix, setMessagePrefix] = useState("");
   const [globalsRows, setGlobalsRows] = useState<GlobalRow[]>([createRow()]);
 
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingGlobals, setSavingGlobals] = useState(false);
+  const [savingPrefix, setSavingPrefix] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function ConfigScreen() {
       const [configRes, globalsRes] = await Promise.all([apiClient.fetchConfig(), apiClient.fetchGlobals()]);
       setWebuiAddr(configRes.webui.listen_addr ?? "");
       setReverseWSAddr(configRes.onebot.reverse_ws.listen_addr ?? "");
+      setMessagePrefix(configRes.message_prefix ?? "");
 
       const rows = Object.entries(globalsRes.globals ?? {}).map(([key, value]) => ({
         id: Math.random().toString(36).slice(2),
@@ -132,6 +135,23 @@ export function ConfigScreen() {
     }
   };
 
+  const savePrefix = async () => {
+    setSavingPrefix(true);
+    setStatus(null);
+    setError(null);
+
+    try {
+      await apiClient.updateConfig({
+        message_prefix: messagePrefix.trim() || undefined,
+      });
+      setStatus(t("config.statusSavePrefix"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("config.errorSavePrefix"));
+    } finally {
+      setSavingPrefix(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[260px] items-center justify-center">
@@ -203,6 +223,35 @@ export function ConfigScreen() {
               isLoading={savingConfig}
               startContent={<Save className="h-4 w-4" />}
               onPress={saveConfig}
+            >
+              {t("config.saveBasic")}
+            </AppButton>
+          </AppCardFooter>
+        </AppCard>
+
+          <AppCard className="lg:col-span-7">
+          <AppCardHeader>
+            <h2 className="text-lg font-semibold text-text">{t("config.prefixTitle")}</h2>
+            <p className="text-sm text-muted">{t("config.prefixDesc")}</p>
+          </AppCardHeader>
+          <AppCardBody>
+            <FormField
+              label={t("config.prefixLabel")}
+            >
+              <AppInput
+                aria-label={t("config.prefixAria")}
+                placeholder={t("config.prefixPlaceholder")}
+                value={messagePrefix}
+                onValueChange={setMessagePrefix}
+              />
+            </FormField>
+          </AppCardBody>
+          <AppCardFooter>
+            <AppButton
+              color="primary"
+              isLoading={savingPrefix}
+              startContent={<Save className="h-4 w-4" />}
+              onPress={savePrefix}
             >
               {t("config.saveBasic")}
             </AppButton>
