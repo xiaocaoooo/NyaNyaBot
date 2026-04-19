@@ -34,6 +34,10 @@ func main() {
 		logger.Error("load plugins dir failed", "err", err)
 	}
 
+	// Start cron scheduler and register all plugin cron jobs.
+	a.Cron.RegisterAllPlugins()
+	a.Cron.Start()
+
 	// Print plugin info at startup.
 	plugins := a.PM.List()
 	logger.Info("plugins loaded", "count", len(plugins))
@@ -46,6 +50,7 @@ func main() {
 			"author", p.Author,
 			"commands", len(p.Commands),
 			"events", len(p.Events),
+			"crons", len(p.Crons),
 		)
 
 		for _, c := range p.Commands {
@@ -67,6 +72,16 @@ func main() {
 				"name", e.Name,
 				"event", e.Event,
 				"handler", e.Handler,
+			)
+		}
+		for _, c := range p.Crons {
+			logger.Info(
+				"plugin cron",
+				"plugin_id", p.PluginID,
+				"id", c.ID,
+				"name", c.Name,
+				"schedule", c.Schedule,
+				"handler", c.Handler,
 			)
 		}
 	}
@@ -95,6 +110,7 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	a.Cron.Stop()
 	_ = a.Web.Shutdown(shutdownCtx)
 	_ = a.OB.Shutdown(shutdownCtx)
 	a.PH.Close()

@@ -39,6 +39,7 @@ type PluginControl struct {
 	Disabled         bool     `json:"disabled,omitempty"`
 	DisabledCommands []string `json:"disabled_commands,omitempty"`
 	DisabledEvents   []string `json:"disabled_events,omitempty"`
+	DisabledCrons    []string `json:"disabled_crons,omitempty"`
 	// CommandPrefix overrides AppConfig.MessagePrefix for this plugin.
 	CommandPrefix string `json:"command_prefix,omitempty"`
 }
@@ -253,6 +254,23 @@ func (c AppConfig) IsEventEnabled(pluginID string, listenerID string) bool {
 	return true
 }
 
+func (c AppConfig) IsCronEnabled(pluginID string, listenerID string) bool {
+	listenerID = strings.TrimSpace(listenerID)
+	if listenerID == "" {
+		return true
+	}
+	control, ok := c.PluginControls[strings.TrimSpace(pluginID)]
+	if !ok {
+		return true
+	}
+	for _, disabledID := range control.DisabledCrons {
+		if disabledID == listenerID {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizePluginControls(in map[string]PluginControl) map[string]PluginControl {
 	if in == nil {
 		return map[string]PluginControl{}
@@ -265,6 +283,7 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		}
 		control.DisabledCommands = normalizeStringSlice(control.DisabledCommands)
 		control.DisabledEvents = normalizeStringSlice(control.DisabledEvents)
+		control.DisabledCrons = normalizeStringSlice(control.DisabledCrons)
 		control.CommandPrefix = strings.TrimSpace(control.CommandPrefix)
 		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 && control.CommandPrefix == "" {
 			continue

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
+	"github.com/xiaocaoooo/nyanyabot/internal/cron"
 	"github.com/xiaocaoooo/nyanyabot/internal/dispatch"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/reversews"
@@ -25,6 +26,7 @@ type App struct {
 	PM     *plugin.Manager
 	PH     *pluginhost.Host
 	Disp   *dispatch.Dispatcher
+	Cron   *cron.Scheduler
 	OB     *reversews.Server
 	Web    *http.Server
 	Stats  *stats.Stats
@@ -52,6 +54,10 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	})
 	disp := dispatch.NewWithLoggerAndStats(pm, logger, st)
 	disp.SetConfigProvider(store.Get)
+
+	// Create cron scheduler
+	cronScheduler := cron.NewScheduler(pm, logger)
+	cronScheduler.SetConfigProvider(store.Get)
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
 	ob.SetStats(st)
@@ -101,6 +107,7 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		PM:     pm,
 		PH:     ph,
 		Disp:   disp,
+		Cron:   cronScheduler,
 		OB:     ob,
 		Web:    httpSrv,
 		Stats:  st,

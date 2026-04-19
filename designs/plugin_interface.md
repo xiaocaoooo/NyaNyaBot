@@ -31,7 +31,8 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 - **Listener（监听器）**：插件声明的“触发条件 + 元信息 + 对应处理函数”。分为：
   - **CommandListener**：命令监听（正则匹配）
   - **EventListener**：事件监听（按字段过滤/匹配）
-- **Handler（处理函数）**：插件内实现的函数；当命令/事件命中时由主程序调用。
+  - **CronListener**：定时任务监听（cron 表达式）
+- **Handler（处理函数）**：插件内实现的函数；当命令/事件/定时任务命中时由主程序调用。
 
 ---
 
@@ -53,14 +54,11 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 
 - 监听的命令 `commands[]`
 - 监听的事件 `events[]`
-
-并且（新增）：
-
-- 可选的配置声明 `config`（见 §3.3）
+- 监听的定时任务 `crons[]`
 
 ### 3.2 监听器（Listener）必须声明的字段
 
-每个监听器必须声明（命令/事件都一样）：
+每个监听器必须声明（命令/事件/定时任务都一样）：
 
 - 名称 `name`
 - ID `id`
@@ -70,14 +68,15 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 
 - 命令监听：`pattern`（正则表达式）
 - 事件监听：`event`（事件名字符串，见 §5）
+- 定时任务监听：`schedule`（cron 表达式，见 §4.4）
 
-还需要声明“命中后调用哪个处理函数”：
+还需要声明"命中后调用哪个处理函数"：
 
 - `handler`：处理函数标识（字符串）
 
 > 约束：
 > - `plugin_id` 在全局唯一。
-> - 同一插件内 `commands[].id`、`events[].id` 均必须唯一。
+> - 同一插件内 `commands[].id`、`events[].id`、`crons[].id` 均必须唯一。
 > - 全局唯一监听器键：`plugin_id + ":" + listener.id`。
 
 ---
@@ -155,7 +154,27 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
     事件名：`"xxx"` 或 `"xxx.xxx"`（见 §5）
   - `handler: string`
 
-> 解释：事件监听改为“字符串事件名”，便于声明与匹配，并与 OneBot 的 `post_type` / `*_type` 结构对齐。
+### 4.4 CronListener
+
+- `CronListener`
+  - `name: string` - 定时任务名称
+  - `id: string` - 唯一标识符
+  - `description: string` - 描述
+  - `schedule: string` - Cron 表达式（支持标准 5 字段格式：分 时 日 月 周）
+  - `handler: string` - 插件内处理函数标识
+
+Cron 表达式使用 [robfig/cron](https://github.com/robfig/cron) 库解析，支持以下格式：
+- 标准格式：`"0 0 * * *"`（每天 0:00）
+- 带秒格式：`"0 */5 * * * *"`（每 5 分钟）
+- 预定义：`@hourly`、`@daily`、`@weekly`、`@every 1h30m`
+
+触发时，主程序会向插件发送一个 `post_type: "cron"` 的特殊事件，包含以下字段：
+- `plugin_id`: 插件 ID
+- `cron_id`: 定时任务 ID
+- `cron_name`: 定时任务名称
+- `cron_schedule`: 定时任务的 cron 表达式
+
+> 解释：事件监听改为"字符串事件名"，便于声明与匹配，并与 OneBot 的 `post_type` / `*_type` 结构对齐。
 
 ---
 
@@ -294,6 +313,15 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
       "description": "观测所有 message 上报",
       "event": "message",
       "handler": "HandleAnyMessage"
+    }
+  ],
+  "crons": [
+    {
+      "name": "daily report",
+      "id": "cron.daily_report",
+      "description": "每天 0:00 发送每日报告",
+      "schedule": "0 0 * * *",
+      "handler": "HandleDailyReport"
     }
   ]
 }
