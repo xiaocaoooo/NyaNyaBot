@@ -40,6 +40,7 @@ type buildURLParams struct {
 	Mobile      *bool             `json:"mobile"`
 	Landscape   *bool             `json:"landscape"`
 	Timeout     *int              `json:"timeout"`
+	Transparent *bool             `json:"transparent"`
 }
 
 func (s *Screenshot) Descriptor(ctx context.Context) (papi.Descriptor, error) {
@@ -82,7 +83,8 @@ func (s *Screenshot) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 						"device_scale":{"type":"number","exclusiveMinimum":0,"maximum":4},
 						"mobile":{"type":"boolean"},
 						"landscape":{"type":"boolean"},
-						"timeout":{"type":"integer","minimum":1,"maximum":120}
+						"timeout":{"type":"integer","minimum":1,"maximum":120},
+						"transparent":{"type":"boolean","description":"是否使用透明背景"}
 					},
 					"anyOf":[
 						{"required":["page_url"]},
@@ -224,6 +226,9 @@ func buildScreenshotURL(screenshotServer string, req buildURLParams) (string, er
 	}
 	if req.Timeout != nil {
 		q.Set("timeout", strconv.Itoa(*req.Timeout))
+	}
+	if req.Transparent != nil {
+		q.Set("transparent", strconv.FormatBool(*req.Transparent))
 	}
 
 	u.RawQuery = q.Encode()
