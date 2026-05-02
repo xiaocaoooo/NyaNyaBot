@@ -82,8 +82,31 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 			out[k] = v
 		}
 		return out
-	}, func(c context.Context, action string, params any) (ob11.APIResponse, error) {
-		return ob.Call(c, action, params)
+	}, func(c context.Context, action string, params any, traceID string) (ob11.APIResponse, error) {
+		// 如果有 TraceID，记录追踪信息
+		if traceID != "" {
+			logger.Debug("plugin sending OneBot request",
+				"trace_id", traceID,
+				"action", action,
+			)
+		}
+		resp, err := ob.Call(c, action, params)
+		if traceID != "" {
+			if err != nil {
+				logger.Debug("plugin OneBot request failed",
+					"trace_id", traceID,
+					"action", action,
+					"error", err,
+				)
+			} else {
+				logger.Debug("plugin OneBot request succeeded",
+					"trace_id", traceID,
+					"action", action,
+					"status", resp.Status,
+				)
+			}
+		}
+		return resp, err
 	}, func(ctx context.Context) (transport.GetStatsReply, error) {
 		snap := st.Snapshot()
 		return transport.GetStatsReply{
@@ -94,7 +117,12 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		}, nil
 	})
 
+	// 连接追踪系统
+	disp.SetTraceProvider(ph)
+	cronScheduler.SetTraceProvider(ph)
+
 	webSrv := web.New(store, pm)
+	webSrv.SetStatsProvider(st)
 	httpSrv := &http.Server{
 		Addr:              cfg.WebUI.ListenAddr,
 		Handler:           webSrv.Handler(),

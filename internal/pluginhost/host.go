@@ -2,16 +2,20 @@ package pluginhost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hclog "github.com/hashicorp/go-hclog"
@@ -26,6 +30,17 @@ type pluginProcess interface {
 	Kill()
 }
 
+// TraceRecord 追踪记录，使用抽象数据结构
+// Type 字段表示触发类型，Data 字段存储具体数据
+type TraceRecord struct {
+	TraceID    string
+	PluginID   string
+	ListenerID string
+	Type       string
+	Data       map[string]interface{}
+	StartTime  time.Time
+}
+
 // Host manages out-of-process go-plugin plugins.
 // It registers them into the in-process plugin.Manager (as RPC-backed Plugin impls).
 type Host struct {
@@ -36,32 +51,133 @@ type Host struct {
 	getPluginConfig func() map[string]json.RawMessage
 	getGlobals      func() map[string]string
 
-	callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
+	callOneBot func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
 	getStats   func(ctx context.Context) (transport.GetStatsReply, error)
+
+	// 追踪系统
+	muTrace         sync.RWMutex
+	traceRecords    map[string]*TraceRecord
+	pluginSentStats map[string]*atomic.Int64
+	logger          *slog.Logger
 }
 
-func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
 	if getPluginConfig == nil {
 		getPluginConfig = func() map[string]json.RawMessage { return nil }
 	}
 	if getGlobals == nil {
 		getGlobals = func() map[string]string { return nil }
 	}
-	return &Host{pm: pm, getPluginConfig: getPluginConfig, getGlobals: getGlobals, callOneBot: callOneBot, getStats: getStats}
+	return &Host{
+		pm:              pm,
+		getPluginConfig: getPluginConfig,
+		getGlobals:      getGlobals,
+		callOneBot:      callOneBot,
+		getStats:        getStats,
+		traceRecords:    make(map[string]*TraceRecord),
+		pluginSentStats: make(map[string]*atomic.Int64),
+		logger:          slog.Default(),
+	}
+}
+
+// BeginTrace 开始一个新的追踪记录
+func (h *Host) BeginTrace(traceID, pluginID, listenerID, traceType string, data map[string]interface{}) {
+	h.muTrace.Lock()
+	defer h.muTrace.Unlock()
+
+	h.traceRecords[traceID] = &TraceRecord{
+		TraceID:    traceID,
+		PluginID:   pluginID,
+		ListenerID: listenerID,
+		Type:       traceType,
+		Data:       data,
+		StartTime:  time.Now(),
+	}
+}
+
+// EndTrace 结束追踪记录
+func (h *Host) EndTrace(traceID string) {
+	h.muTrace.Lock()
+	defer h.muTrace.Unlock()
+	delete(h.traceRecords, traceID)
+}
+
+// GetTraceRecord 获取追踪记录
+func (h *Host) GetTraceRecord(traceID string) (*TraceRecord, bool) {
+	h.muTrace.RLock()
+	defer h.muTrace.RUnlock()
+	r, ok := h.traceRecords[traceID]
+	return r, ok
+}
+
+// IncPluginSent 增加插件发送计数
+func (h *Host) IncPluginSent(pluginID string) {
+	h.muTrace.RLock()
+	stat, ok := h.pluginSentStats[pluginID]
+	h.muTrace.RUnlock()
+
+	if !ok {
+		h.muTrace.Lock()
+		stat, ok = h.pluginSentStats[pluginID]
+		if !ok {
+			stat = &atomic.Int64{}
+			h.pluginSentStats[pluginID] = stat
+		}
+		h.muTrace.Unlock()
+	}
+	stat.Add(1)
+}
+
+// GetPluginSentStats 获取插件发送统计
+func (h *Host) GetPluginSentStats() map[string]int64 {
+	h.muTrace.RLock()
+	defer h.muTrace.RUnlock()
+
+	result := make(map[string]int64, len(h.pluginSentStats))
+	for pluginID, stat := range h.pluginSentStats {
+		result[pluginID] = stat.Load()
+	}
+	return result
+}
+
+// GenerateTraceID 生成唯一的追踪ID
+func (h *Host) GenerateTraceID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 type hostAPI struct {
+	host           *Host
 	callerPluginID string
-	call           func(ctx context.Context, action string, params any) (ob11.APIResponse, error)
+	call           func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
 	callDependency func(ctx context.Context, callerPluginID string, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *papi.StructuredError)
 	getStats       func(ctx context.Context) (transport.GetStatsReply, error)
 }
 
-func (h hostAPI) CallOneBot(ctx context.Context, action string, params any) (ob11.APIResponse, error) {
+func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error) {
 	if h.call == nil {
 		return ob11.APIResponse{}, errors.New("host onebot callback is not configured")
 	}
-	return h.call(ctx, action, params)
+
+	// 如果有活跃的 TraceID，记录追踪信息
+	if traceID != "" && h.host != nil {
+		if record, ok := h.host.GetTraceRecord(traceID); ok {
+			h.host.logger.Info("plugin CallOneBot",
+				"trace_id", traceID,
+				"plugin_id", h.callerPluginID,
+				"listener_id", record.ListenerID,
+				"action", action,
+				"type", record.Type,
+			)
+		}
+		// 增加插件发送统计
+		h.host.IncPluginSent(h.callerPluginID)
+	}
+
+	return h.call(ctx, action, params, traceID)
 }
 
 func (h hostAPI) CallDependency(ctx context.Context, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *papi.StructuredError) {
@@ -275,6 +391,7 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 		}
 
 		api := hostAPI{
+			host:           h,
 			callerPluginID: pluginID,
 			call:           h.callOneBot,
 			callDependency: h.callDependency,

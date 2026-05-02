@@ -2,23 +2,26 @@ package stats
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // Stats 记录运行时统计信息
 type Stats struct {
-	recvCount atomic.Int64 // 收到的消息数
-	sentCount atomic.Int64 // 发送的消息数
-	startTime time.Time    // 启动时间
+	recvCount       atomic.Int64 // 收到的消息数
+	sentCount       atomic.Int64 // 发送的消息数
+	startTime       time.Time    // 启动时间
+	pluginSentStats sync.Map     // pluginID → *atomic.Int64
 }
 
 // Snapshot 是统计信息的快照
 type Snapshot struct {
-	RecvCount int64     `json:"recv_count"`
-	SentCount int64     `json:"sent_count"`
-	StartTime time.Time `json:"start_time"`
-	Uptime    string    `json:"uptime"`
+	RecvCount       int64            `json:"recv_count"`
+	SentCount       int64            `json:"sent_count"`
+	PluginSentStats map[string]int64 `json:"plugin_sent_stats,omitempty"`
+	StartTime       time.Time        `json:"start_time"`
+	Uptime          string           `json:"uptime"`
 }
 
 // New 创建一个新的 Stats 实例
@@ -38,13 +41,39 @@ func (s *Stats) IncSent() {
 	s.sentCount.Add(1)
 }
 
+// IncSentByPlugin 增加指定插件的发送消息计数
+func (s *Stats) IncSentByPlugin(pluginID string) {
+	if s == nil || pluginID == "" {
+		return
+	}
+	val, _ := s.pluginSentStats.LoadOrStore(pluginID, &atomic.Int64{})
+	if counter, ok := val.(*atomic.Int64); ok {
+		counter.Add(1)
+	}
+}
+
+// GetPluginSentStats 获取各插件的发送统计
+func (s *Stats) GetPluginSentStats() map[string]int64 {
+	result := make(map[string]int64)
+	s.pluginSentStats.Range(func(key, value interface{}) bool {
+		if pluginID, ok := key.(string); ok {
+			if counter, ok := value.(*atomic.Int64); ok {
+				result[pluginID] = counter.Load()
+			}
+		}
+		return true
+	})
+	return result
+}
+
 // Snapshot 返回当前统计信息的快照
 func (s *Stats) Snapshot() Snapshot {
 	return Snapshot{
-		RecvCount: s.recvCount.Load(),
-		SentCount: s.sentCount.Load(),
-		StartTime: s.startTime,
-		Uptime:    s.FormatUptime(),
+		RecvCount:       s.recvCount.Load(),
+		SentCount:       s.sentCount.Load(),
+		PluginSentStats: s.GetPluginSentStats(),
+		StartTime:       s.startTime,
+		Uptime:          s.FormatUptime(),
 	}
 }
 

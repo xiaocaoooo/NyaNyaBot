@@ -48,6 +48,14 @@ export interface EventListener {
   handler: string;
 }
 
+export interface CronListener {
+  name: string;
+  id: string;
+  description?: string;
+  schedule: string;
+  handler?: string;
+}
+
 export interface ExportSpec {
   name: string;
   description: string;
@@ -66,12 +74,14 @@ export interface PluginDescriptor {
   config?: PluginConfigSpec;
   commands: CommandListener[];
   events: EventListener[];
+  crons: CronListener[];
 }
 
 export interface PluginStateView {
   enabled: boolean;
   commands: Record<string, boolean>;
   events: Record<string, boolean>;
+  crons: Record<string, boolean>;
   command_prefix?: string;
 }
 
@@ -100,6 +110,7 @@ export interface UpdatePluginSwitchesPayload {
   enabled?: boolean;
   commands?: Record<string, boolean>;
   events?: Record<string, boolean>;
+  crons?: Record<string, boolean>;
   prefix?: string;
 }
 

@@ -4,11 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"net/rpc"
+	"sync"
 
 	"github.com/hashicorp/go-plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	papi "github.com/xiaocaoooo/nyanyabot/internal/plugin"
 )
+
+// traceIDStorage 是线程本地存储，用于在 Handle 和 CallOneBot 之间传递 TraceID
+var traceIDStorage = struct {
+	sync.RWMutex
+	id string
+}{}
+
+func setCurrentTraceID(id string) {
+	traceIDStorage.Lock()
+	traceIDStorage.id = id
+	traceIDStorage.Unlock()
+}
+
+func getCurrentTraceID() string {
+	traceIDStorage.RLock()
+	defer traceIDStorage.RUnlock()
+	return traceIDStorage.id
+}
+
+func clearCurrentTraceID() {
+	traceIDStorage.Lock()
+	traceIDStorage.id = ""
+	traceIDStorage.Unlock()
+}
 
 // ===== Plugin-side service (called by host) =====
 
@@ -42,6 +67,10 @@ func (s *PluginRPCServer) Invoke(args InvokeArgs, resp *InvokeReply) error {
 }
 
 func (s *PluginRPCServer) Handle(args HandleArgs, resp *HandleReply) error {
+	// 将 TraceID 存入线程本地存储，供后续的 CallOneBot 使用
+	setCurrentTraceID(args.TraceID)
+	defer clearCurrentTraceID()
+
 	r, err := s.Impl.Handle(context.Background(), args.ListenerID, args.EventRawJSON, args.Match)
 	if err != nil {
 		return err
@@ -75,8 +104,9 @@ func (s *PluginRPCServer) AttachHost(args AttachHostArgs, _ *struct{}) error {
 
 // PluginRPCClient is used on the host to call into the plugin.
 type PluginRPCClient struct {
-	client *rpc.Client
-	broker *plugin.MuxBroker
+	client  *rpc.Client
+	broker  *plugin.MuxBroker
+	traceID string // 待传递的 TraceID
 }
 
 // In plugin process we keep a global host RPC client, so plugin implementations
@@ -117,11 +147,15 @@ func (c *PluginRPCClient) Invoke(ctx context.Context, method string, paramsJSON 
 func (c *PluginRPCClient) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	_ = ctx
 	var resp HandleReply
-	args := HandleArgs{ListenerID: listenerID, EventRawJSON: json.RawMessage(eventRaw), Match: match}
+	args := HandleArgs{ListenerID: listenerID, EventRawJSON: json.RawMessage(eventRaw), Match: match, TraceID: c.traceID}
 	if err := c.client.Call("Plugin.Handle", args, &resp); err != nil {
 		return papi.HandleResult{}, err
 	}
 	return resp, nil
+}
+
+func (c *PluginRPCClient) SetTraceID(traceID string) {
+	c.traceID = traceID
 }
 
 func (c *PluginRPCClient) Configure(ctx context.Context, config json.RawMessage) error {
@@ -162,7 +196,7 @@ func (s *HostRPCServer) CallOneBot(args CallOneBotArgs, resp *CallOneBotReply) e
 			return err
 		}
 	}
-	r, err := s.Impl.CallOneBot(context.Background(), args.Action, params)
+	r, err := s.Impl.CallOneBot(context.Background(), args.Action, params, args.TraceID)
 	if err != nil {
 		return err
 	}
@@ -199,8 +233,10 @@ func (c *HostRPCClient) CallOneBot(ctx context.Context, action string, params an
 		return ob11.APIResponse{}, err
 	}
 	var resp CallOneBotReply
+	// 从线程本地存储获取 TraceID
+	traceID := getCurrentTraceID()
 	// Note: when served via MuxBroker.AcceptAndServe, service name is always "Plugin".
-	if err := c.client.Call("Plugin.CallOneBot", CallOneBotArgs{Action: action, Params: b}, &resp); err != nil {
+	if err := c.client.Call("Plugin.CallOneBot", CallOneBotArgs{Action: action, Params: b, TraceID: traceID}, &resp); err != nil {
 		return ob11.APIResponse{}, err
 	}
 	return resp.Resp, nil

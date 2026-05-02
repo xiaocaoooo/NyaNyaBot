@@ -597,6 +597,18 @@ export function PluginsScreen() {
     [savePluginSwitches, selectedPlugin],
   );
 
+  const handleCronToggle = useCallback(
+    async (listenerId: string, nextEnabled: boolean) => {
+      if (!selectedPlugin) {
+        return;
+      }
+      await savePluginSwitches(selectedPlugin.plugin_id, {
+        crons: { [listenerId]: nextEnabled },
+      });
+    },
+    [savePluginSwitches, selectedPlugin],
+  );
+
   const handleModeChange = (key: Key) => {
     const nextMode = String(key) as EditorMode;
     if (nextMode === "schema") {
@@ -763,6 +775,9 @@ export function PluginsScreen() {
                             {t("plugins.events", { count: selectedPlugin.events.length })}
                           </Chip>
                           <Chip radius="sm" variant="flat">
+                            {t("plugins.crons", { count: selectedPlugin.crons.length })}
+                          </Chip>
+                          <Chip radius="sm" variant="flat">
                             {t("plugins.dependencies", { count: selectedPlugin.dependencies.length })}
                           </Chip>
                           <Chip radius="sm" variant="flat">
@@ -895,6 +910,44 @@ export function PluginsScreen() {
                                     />
                                     <Chip radius="sm" size="sm" variant="flat">
                                       {eventEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                                    </Chip>
+                                  </div>
+                                </li>
+                              );
+                            })
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
+                        <p className="text-sm font-medium text-text">{t("plugins.listenerCrons")}</p>
+                        <ul className="mt-2 space-y-2 text-sm text-muted">
+                          {selectedPlugin.crons.length === 0 ? (
+                            <li>{t("plugins.none")}</li>
+                          ) : (
+                            selectedPlugin.crons.slice(0, 6).map((cron) => {
+                              const cronEnabled = selectedPlugin.state.crons[cron.id] ?? true;
+                              return (
+                                <li
+                                  key={cron.id}
+                                  className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-surface/70 p-3"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-text">{cron.name}</p>
+                                    <p className="font-mono text-xs break-all">{cron.schedule}</p>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2">
+                                    <Switch
+                                      aria-label={`${cron.name} ${t("plugins.listenerCrons")}`}
+                                      isDisabled={savingSwitches || !selectedPlugin.state.enabled}
+                                      isSelected={cronEnabled}
+                                      size="sm"
+                                      onValueChange={(next) => {
+                                        void handleCronToggle(cron.id, next);
+                                      }}
+                                    />
+                                    <Chip radius="sm" size="sm" variant="flat">
+                                      {cronEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
                                     </Chip>
                                   </div>
                                 </li>

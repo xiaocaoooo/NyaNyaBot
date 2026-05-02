@@ -16,6 +16,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 )
 
 type pluginConfigPatch struct {
@@ -42,14 +43,24 @@ type pluginListItem struct {
 }
 
 type Server struct {
-	store    *config.Store
-	pm       *plugin.Manager
-	frontend fs.FS
-	sessions *sessionManager
+	store         *config.Store
+	pm            *plugin.Manager
+	statsProvider StatsProvider
+	frontend      fs.FS
+	sessions      *sessionManager
+}
+
+// StatsProvider 提供统计信息的接口
+type StatsProvider interface {
+	Snapshot() stats.Snapshot
 }
 
 func New(store *config.Store, pm *plugin.Manager) *Server {
 	return &Server{store: store, pm: pm, frontend: frontendFS(), sessions: newSessionManager()}
+}
+
+func (s *Server) SetStatsProvider(sp StatsProvider) {
+	s.statsProvider = sp
 }
 
 func (s *Server) Handler() http.Handler {
@@ -60,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/globals", s.handleGlobals)
+	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
 	mux.HandleFunc("/api/plugins/", s.handlePluginSubAPI)
 
@@ -381,6 +393,19 @@ func (s *Server) handlePluginSubAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.statsProvider == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "stats not available"})
+		return
+	}
+	snap := s.statsProvider.Snapshot()
+	writeJSON(w, http.StatusOK, snap)
 }
 
 func (s *Server) handleGlobals(w http.ResponseWriter, r *http.Request) {
