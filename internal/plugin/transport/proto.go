@@ -31,6 +31,7 @@ type HandleArgs struct {
 	ListenerID   string          `json:"listener_id"`
 	EventRawJSON json.RawMessage `json:"event_raw_json"`
 	Match        *plugin.CommandMatch
+	TraceID      string          `json:"trace_id"`
 }
 
 type HandleReply = plugin.HandleResult
@@ -47,8 +48,9 @@ type InvokeReply struct {
 }
 
 type CallOneBotArgs struct {
-	Action string          `json:"action"`
-	Params json.RawMessage `json:"params"`
+	Action  string          `json:"action"`
+	Params  json.RawMessage `json:"params"`
+	TraceID string          `json:"trace_id"`
 }
 
 type CallOneBotReply struct {
@@ -79,7 +81,7 @@ type GetStatsReply struct {
 
 // HostAPI is implemented by host and exposed to plugin.
 type HostAPI interface {
-	CallOneBot(ctx context.Context, action string, params any) (ob11.APIResponse, error)
+	CallOneBot(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
 	CallDependency(ctx context.Context, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *plugin.StructuredError)
 	GetStats(ctx context.Context) (GetStatsReply, error)
 }

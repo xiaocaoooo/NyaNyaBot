@@ -210,6 +210,12 @@ func (s *Server) Call(ctx context.Context, action string, params any) (ob11.APIR
 	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	s.logger.Debug("onebot ws send", "remote", sess.remote, "bytes", len(payload), "payload", truncateForLog(payload, 8*1024))
+
+	// 统计发送消息数
+	if s.stats != nil {
+		s.stats.IncSent()
+	}
+
 	if err := sess.conn.Write(writeCtx, websocket.MessageText, payload); err != nil {
 		// cleanup pending
 		sess.mu.Lock()

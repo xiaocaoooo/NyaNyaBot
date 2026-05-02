@@ -14,11 +14,24 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 )
 
+// TraceProvider 提供追踪功能的接口
+type TraceProvider interface {
+	BeginTrace(traceID, pluginID, listenerID, traceType string, data map[string]interface{})
+	EndTrace(traceID string)
+	GenerateTraceID() string
+}
+
+// TraceIDSetter 允许设置 TraceID 的接口
+type TraceIDSetter interface {
+	SetTraceID(traceID string)
+}
+
 type Dispatcher struct {
-	pm        *plugin.Manager
-	logger    *slog.Logger
-	stats     *stats.Stats
-	getConfig func() config.AppConfig
+	pm            *plugin.Manager
+	logger        *slog.Logger
+	stats         *stats.Stats
+	getConfig     func() config.AppConfig
+	traceProvider TraceProvider
 }
 
 func New(pm *plugin.Manager) *Dispatcher {
@@ -43,6 +56,10 @@ func (d *Dispatcher) SetConfigProvider(fn func() config.AppConfig) {
 	d.getConfig = fn
 }
 
+func (d *Dispatcher) SetTraceProvider(tp TraceProvider) {
+	d.traceProvider = tp
+}
+
 // Dispatch routes a raw OneBot event to plugins.
 func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	entries := d.pm.Entries()
@@ -60,6 +77,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 		return
 	}
 
+	// 提取消息元数据（用于追踪）
+	groupID := getString(raw, "group_id")
+	userID := getString(raw, "user_id")
+	messageSeq := getString(raw, "message_seq")
+	rawMsg := getString(raw, "raw_message")
+
 	// 1) event listeners
 	eventKey, eventKeyFull := computeEventKeys(raw)
 	for pid, desc := range entries {
@@ -75,6 +98,27 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			if matchEvent(l.Event, eventKey, eventKeyFull) {
+				// 生成 TraceID 并注册追踪记录
+				traceID := ""
+				if d.traceProvider != nil {
+					traceID = d.traceProvider.GenerateTraceID()
+					traceData := map[string]interface{}{
+						"event_type": eventKey,
+						"sub_type":   eventKeyFull,
+					}
+					if userID != "" {
+						traceData["user_id"] = userID
+					}
+					if groupID != "" {
+						traceData["group_id"] = groupID
+					}
+					d.traceProvider.BeginTrace(traceID, pid, l.ID, "event", traceData)
+					defer d.traceProvider.EndTrace(traceID)
+				}
+				// 设置 TraceID（如果插件支持）
+				if setter, ok := p.(TraceIDSetter); ok {
+					setter.SetTraceID(traceID)
+				}
 				// no match info
 				_, _ = p.Handle(ctx, l.ID, raw, nil)
 			}
@@ -92,10 +136,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	}
 
 	// Log: sender + raw_message
-	groupID := getString(raw, "group_id")
-	senderID := getString(raw, "user_id")
-	rawMsg := getString(raw, "raw_message")
-
 	senderInfo := ""
 	var obj map[string]any
 	if json.Unmarshal(raw, &obj) == nil {
@@ -105,7 +145,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	}
 
 	d.logger.Info("[dispatch] message received",
-		"sender", senderID,
+		"sender", userID,
 		"nickname", senderInfo,
 		"group_id", groupID,
 		"raw_message", rawMsg,
@@ -203,6 +243,26 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				"plugin_id", pid,
 				"command_id", c.ID,
 			)
+
+			// 生成 TraceID 并注册追踪记录
+			traceID := ""
+			if d.traceProvider != nil {
+				traceID = d.traceProvider.GenerateTraceID()
+				traceData := map[string]interface{}{
+					"group_id":    groupID,
+					"seq":         messageSeq,
+					"user_id":     userID,
+					"raw_message": rawMsg,
+				}
+				d.traceProvider.BeginTrace(traceID, pid, c.ID, "message", traceData)
+				defer d.traceProvider.EndTrace(traceID)
+			}
+
+			// 设置 TraceID（如果插件支持）
+			if setter, ok := p.(TraceIDSetter); ok {
+				setter.SetTraceID(traceID)
+			}
+
 			if _, err := p.Handle(ctx, c.ID, raw, cm); err != nil {
 				d.logger.Error("[dispatch] plugin Handle error",
 					"plugin_id", pid,

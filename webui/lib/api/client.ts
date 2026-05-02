@@ -4,6 +4,7 @@ import type {
   AuthStatusResponse,
   CommandListener,
   ConfigPatch,
+  CronListener,
   ExportSpec,
   EventListener,
   GlobalsResponse,
@@ -92,6 +93,7 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     enabled: state?.enabled ?? true,
     commands: state?.commands ?? {},
     events: state?.events ?? {},
+    crons: state?.crons ?? {},
     command_prefix: state?.command_prefix ?? "",
   };
 }
@@ -102,6 +104,7 @@ function normalizePluginDescriptor(
     exports?: ExportSpec[] | null;
     commands?: CommandListener[] | null;
     events?: EventListener[] | null;
+    crons?: CronListener[] | null;
   },
 ): PluginDescriptor {
   return {
@@ -110,6 +113,7 @@ function normalizePluginDescriptor(
     exports: ensureArray(plugin.exports),
     commands: ensureArray(plugin.commands),
     events: ensureArray(plugin.events),
+    crons: ensureArray(plugin.crons),
   };
 }
 
@@ -119,6 +123,7 @@ function normalizePluginListItem(
     exports?: ExportSpec[] | null;
     commands?: CommandListener[] | null;
     events?: EventListener[] | null;
+    crons?: CronListener[] | null;
     state?: Partial<PluginStateView> | null;
   },
 ): PluginListItem {

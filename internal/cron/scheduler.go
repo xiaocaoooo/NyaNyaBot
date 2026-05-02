@@ -12,14 +12,27 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 )
 
+// TraceProvider 提供追踪功能的接口
+type TraceProvider interface {
+	BeginTrace(traceID, pluginID, listenerID, traceType string, data map[string]interface{})
+	EndTrace(traceID string)
+	GenerateTraceID() string
+}
+
+// TraceIDSetter 允许设置 TraceID 的接口
+type TraceIDSetter interface {
+	SetTraceID(traceID string)
+}
+
 // Scheduler 管理插件的 cron 触发器
 type Scheduler struct {
-	pm       *plugin.Manager
-	logger   *slog.Logger
-	cron     *cron.Cron
-	mu       sync.RWMutex
-	entries  map[string]cron.EntryID // key: pluginID:cronID
-	getConfig func() config.AppConfig
+	pm            *plugin.Manager
+	logger        *slog.Logger
+	cron          *cron.Cron
+	mu            sync.RWMutex
+	entries       map[string]cron.EntryID // key: pluginID:cronID
+	getConfig     func() config.AppConfig
+	traceProvider TraceProvider
 }
 
 // NewScheduler 创建一个新的 cron 调度器
@@ -35,6 +48,11 @@ func NewScheduler(pm *plugin.Manager, logger *slog.Logger) *Scheduler {
 // SetConfigProvider 设置配置提供函数
 func (s *Scheduler) SetConfigProvider(fn func() config.AppConfig) {
 	s.getConfig = fn
+}
+
+// SetTraceProvider 设置追踪提供者
+func (s *Scheduler) SetTraceProvider(tp TraceProvider) {
+	s.traceProvider = tp
 }
 
 // Start 启动 cron 调度器
@@ -138,6 +156,23 @@ func (s *Scheduler) addCronJob(pluginID string, c plugin.CronListener) {
 
 		// 构造一个虚拟的 cron 触发事件
 		event := ob11.Event(s.buildCronEvent(pluginID, c))
+
+		// 生成 TraceID 并注册追踪记录
+		traceID := ""
+		if s.traceProvider != nil {
+			traceID = s.traceProvider.GenerateTraceID()
+			traceData := map[string]interface{}{
+				"schedule":  c.Schedule,
+				"cron_name": c.Name,
+			}
+			s.traceProvider.BeginTrace(traceID, pluginID, c.ID, "cron", traceData)
+			defer s.traceProvider.EndTrace(traceID)
+		}
+
+		// 设置 TraceID（如果插件支持）
+		if setter, ok := p.(TraceIDSetter); ok {
+			setter.SetTraceID(traceID)
+		}
 
 		// 调用插件的 Handle 方法
 		ctx := context.Background()
