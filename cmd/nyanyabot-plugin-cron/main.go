@@ -36,13 +36,13 @@ func (c *CronTimePlugin) Descriptor(ctx context.Context) (papi.Descriptor, error
 	def := json.RawMessage(`{"group_id": 0}`)
 
 	return papi.Descriptor{
-		Name:        "CronTime",
-		PluginID:    "external.cron_time",
-		Version:     "0.1.0",
-		Author:      "nyanyabot",
-		Description: "每分钟在特定群聊发送当前时间的测试插件",
-		Dependencies:  []string{},
-		Exports:       []papi.ExportSpec{},
+		Name:         "CronTime",
+		PluginID:     "external.cron_time",
+		Version:      "0.1.0",
+		Author:       "nyanyabot",
+		Description:  "每分钟在特定群聊发送当前时间的测试插件",
+		Dependencies: []string{},
+		Exports:      []papi.ExportSpec{},
 		Config: &papi.ConfigSpec{
 			Version:     "1",
 			Description: "CronTime plugin config",
@@ -55,7 +55,7 @@ func (c *CronTimePlugin) Descriptor(ctx context.Context) (papi.Descriptor, error
 				ID:          "cmd.set_group",
 				Description: "设置发送时间的群号：/set_group 123456",
 				Pattern:     `^/?set_group\s+(\d+)$`,
-				MatchRaw:    true,
+				MatchRaw:    false,
 				Handler:     "HandleSetGroup",
 			},
 		},
@@ -140,8 +140,8 @@ func (c *CronTimePlugin) handleSetGroup(eventRaw ob11.Event, match *papi.Command
 		})
 	} else {
 		_, _ = host.CallOneBot(context.Background(), "send_private_msg", map[string]any{
-			"user_id":  userID,
-			"message":  reply,
+			"user_id": userID,
+			"message": reply,
 		})
 	}
 

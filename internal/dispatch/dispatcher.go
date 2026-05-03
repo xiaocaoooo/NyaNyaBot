@@ -119,8 +119,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				if setter, ok := p.(TraceIDSetter); ok {
 					setter.SetTraceID(traceID)
 				}
+				// 只对 message 事件注入 content 字段
+				eventRaw := raw
+				if postType == "message" {
+					content := deriveContent(raw)
+					eventRaw = injectContentFieldWithValue(raw, content)
+				}
 				// no match info
-				_, _ = p.Handle(ctx, l.ID, raw, nil)
+				_, _ = p.Handle(ctx, l.ID, eventRaw, nil)
 			}
 		}
 	}
@@ -263,7 +269,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				setter.SetTraceID(traceID)
 			}
 
-			if _, err := p.Handle(ctx, c.ID, raw, cm); err != nil {
+			// 注入 content 字段到 raw（复用已计算的 content）
+			rawWithContent := injectContentFieldWithValue(raw, content)
+
+			if _, err := p.Handle(ctx, c.ID, rawWithContent, cm); err != nil {
 				d.logger.Error("[dispatch] plugin Handle error",
 					"plugin_id", pid,
 					"command_id", c.ID,
@@ -382,4 +391,20 @@ func getString(raw ob11.Event, key string) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// injectContentFieldWithValue 在 raw 顶层注入 content 字段（接收已计算的 content）
+// 即使 content 为空字符串，也会注入该字段
+// 如果解析或重新 marshal 失败，回退返回原始 raw
+func injectContentFieldWithValue(raw ob11.Event, content string) ob11.Event {
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return raw
+	}
+	obj["content"] = content
+	newRaw, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return newRaw
 }

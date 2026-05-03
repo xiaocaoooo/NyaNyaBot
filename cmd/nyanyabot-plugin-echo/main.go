@@ -49,7 +49,7 @@ func (e *Echo) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 				Description: "匹配 /echo xxx 并回声",
 				// Accept both "/echo ..." and "echo ...".
 				Pattern:  `^/?echo\s+(.+)$`,
-				MatchRaw: true,
+				MatchRaw: false,
 				Handler:  "HandleEcho",
 			},
 			{
@@ -57,7 +57,7 @@ func (e *Echo) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 				ID:          "cmd.echo.cfg",
 				Description: "调用 external.configdump 导出函数并回显结果",
 				Pattern:     `^/?echo_cfg(?:\s+(pretty))?$`,
-				MatchRaw:    true,
+				MatchRaw:    false,
 				Handler:     "HandleEchoCfg",
 			},
 		},
@@ -126,9 +126,9 @@ func (e *Echo) handleEcho(eventRaw ob11.Event, match *papi.CommandMatch) (papi.H
 		}
 	}
 	if text == "" {
-		raw, _ := evt["raw_message"].(string)
+		content, _ := evt["content"].(string)
 		re := regexp.MustCompile(`^/?echo\s+(.+)$`)
-		m := re.FindStringSubmatch(raw)
+		m := re.FindStringSubmatch(content)
 		if len(m) >= 2 {
 			text = m[1]
 		}

@@ -54,7 +54,7 @@ func (p *ConfigDump) Descriptor(ctx context.Context) (papi.Descriptor, error) {
 				ID:          "cmd.cfg",
 				Description: "输入 /cfg 或 /cfg pretty，返回插件当前配置（用于测试热更新）",
 				Pattern:     `^/?cfg(?:\s+(pretty))?$`,
-				MatchRaw:    true,
+				MatchRaw:    false,
 				Handler:     "HandleCfg",
 			},
 		},
@@ -163,9 +163,9 @@ func (p *ConfigDump) handleCfg(eventRaw ob11.Event, match *papi.CommandMatch) (p
 	if match != nil && len(match.Groups) > 0 {
 		pretty = match.Groups[0] == "pretty"
 	} else {
-		raw, _ := evt["raw_message"].(string)
+		content, _ := evt["content"].(string)
 		re := regexp.MustCompile(`^/?cfg(?:\s+(pretty))?$`)
-		m := re.FindStringSubmatch(raw)
+		m := re.FindStringSubmatch(content)
 		if len(m) >= 2 && m[1] == "pretty" {
 			pretty = true
 		}
