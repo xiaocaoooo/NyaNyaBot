@@ -50,10 +50,9 @@ func (p *StatusPlugin) Invoke(ctx context.Context, method string, paramsJSON jso
 }
 
 func (p *StatusPlugin) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
-	_ = ctx
 	switch listenerID {
 	case "cmd.status":
-		return p.handleStatus(eventRaw, match)
+		return p.handleStatus(ctx, eventRaw, match)
 	default:
 		return papi.HandleResult{}, nil
 	}
@@ -63,14 +62,14 @@ func (p *StatusPlugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *StatusPlugin) handleStatus(eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
+func (p *StatusPlugin) handleStatus(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {
 		return papi.HandleResult{}, nil
 	}
 
 	// 获取统计信息
-	statsReply, err := host.GetStats(context.Background())
+	statsReply, err := host.GetStats(ctx)
 	if err != nil {
 		return papi.HandleResult{}, err
 	}
@@ -92,13 +91,13 @@ func (p *StatusPlugin) handleStatus(eventRaw ob11.Event, match *papi.CommandMatc
 	msgType, _ := evt["message_type"].(string)
 	if msgType == "group" {
 		groupID := evt["group_id"]
-		_, _ = host.CallOneBot(context.Background(), "send_group_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_group_msg", map[string]any{
 			"group_id": groupID,
 			"message":  reply,
 		})
 	} else {
 		userID := evt["user_id"]
-		_, _ = host.CallOneBot(context.Background(), "send_private_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_private_msg", map[string]any{
 			"user_id": userID,
 			"message": reply,
 		})

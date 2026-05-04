@@ -17,6 +17,7 @@ type GroupMessage struct {
 	RawMessage      string            `json:"raw_message"`
 	MessageSegments []json.RawMessage `json:"message_segments"`
 	RecordedAt      time.Time         `json:"recorded_at"`
+	SelfID          int64             `json:"self_id"` // Bot 自身的 QQ 号
 }
 
 // QueuedMessage 表示队列中的消息（面向未来 Valkey Streams）
@@ -42,8 +43,11 @@ type Queue interface {
 
 // OneBotCaller 定义 OneBot API 调用接口
 type OneBotCaller interface {
-	// CallAPI 调用 OneBot API
+	// CallAPI 调用 OneBot API（兼容旧代码，单 Bot 场景）
 	CallAPI(ctx context.Context, action string, params interface{}) (json.RawMessage, error)
+
+	// CallAPIWithBot 调用 OneBot API 并指定 Bot（多 Bot 场景）
+	CallAPIWithBot(ctx context.Context, selfID int64, action string, params interface{}) (json.RawMessage, error)
 }
 
 // 错误定义

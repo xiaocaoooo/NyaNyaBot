@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
+	"github.com/xiaocaoooo/nyanyabot/internal/dedup"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
@@ -26,12 +28,19 @@ type TraceIDSetter interface {
 	SetTraceID(traceID string)
 }
 
+// BotIDProvider 提供所有连接的 Bot ID 列表
+type BotIDProvider interface {
+	GetBotIDs() []int64
+}
+
 type Dispatcher struct {
 	pm            *plugin.Manager
 	logger        *slog.Logger
 	stats         *stats.Stats
 	getConfig     func() config.AppConfig
 	traceProvider TraceProvider
+	deduper       dedup.Deduper
+	botIDProvider BotIDProvider
 }
 
 func New(pm *plugin.Manager) *Dispatcher {
@@ -60,6 +69,15 @@ func (d *Dispatcher) SetTraceProvider(tp TraceProvider) {
 	d.traceProvider = tp
 }
 
+func (d *Dispatcher) SetDeduper(deduper dedup.Deduper) {
+	d.deduper = deduper
+}
+
+// SetBotIDProvider 设置 Bot ID 提供者
+func (d *Dispatcher) SetBotIDProvider(provider BotIDProvider) {
+	d.botIDProvider = provider
+}
+
 // Dispatch routes a raw OneBot event to plugins.
 func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	entries := d.pm.Entries()
@@ -82,6 +100,26 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	userID := getString(raw, "user_id")
 	messageSeq := getString(raw, "message_seq")
 	rawMsg := getString(raw, "raw_message")
+
+	// 去重检查（仅对群消息生效）
+	messageType := getString(raw, "message_type")
+	if cfg.IsMessageDedupEnabled() && d.deduper != nil && messageType == "group" {
+		gid := parseIntOrZero(groupID)
+		seq := parseIntOrZero(messageSeq)
+		if gid > 0 && seq > 0 {
+			if !d.deduper.TryMarkProcessed(gid, seq) {
+				// 消息已处理过，跳过
+				if d.stats != nil {
+					d.stats.IncDedup()
+				}
+				d.logger.Info("[dispatch] duplicate message skipped",
+					"group_id", groupID,
+					"message_seq", messageSeq,
+				)
+				return
+			}
+		}
+	}
 
 	// 1) event listeners
 	eventKey, eventKeyFull := computeEventKeys(raw)
@@ -139,6 +177,37 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	// 统计接收的消息数
 	if d.stats != nil {
 		d.stats.IncRecv()
+	}
+
+	// 强制仅群聊过滤：非群聊消息不进入插件处理
+	if messageType != "group" {
+		if d.stats != nil {
+			d.stats.IncFilteredNonGroup()
+		}
+		d.logger.Info("[dispatch] filtered non-group message",
+			"message_type", messageType,
+			"user_id", userID,
+		)
+		return
+	}
+
+	// Bot 消息过滤：过滤所有 Bot 发送的消息
+	if d.botIDProvider != nil {
+		botIDs := d.botIDProvider.GetBotIDs()
+		userIDInt := parseIntOrZero(userID)
+
+		for _, botID := range botIDs {
+			if botID == userIDInt {
+				if d.stats != nil {
+					d.stats.IncFilteredSelf()
+				}
+				d.logger.Info("[dispatch] filtered bot message",
+					"user_id", userID,
+					"bot_id", botID,
+				)
+				return
+			}
+		}
 	}
 
 	// Log: sender + raw_message
@@ -407,4 +476,13 @@ func injectContentFieldWithValue(raw ob11.Event, content string) ob11.Event {
 		return raw
 	}
 	return newRaw
+}
+
+// parseIntOrZero 将字符串解析为 int64，解析失败返回 0
+func parseIntOrZero(s string) int64 {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }

@@ -1,0 +1,19 @@
+{
+  "onebot": {
+    "reverse_ws": {
+      "listen_addr": "0.0.0.0:3001"
+    }
+  },
+  "webui": {
+    "listen_addr": "0.0.0.0:3000"
+  },
+  "message_prefix": "^>(?P<content>.+)$",
+  "dedup": {
+    "enabled": true,
+    "backend": "memory",
+    "ttl_seconds": 3600
+  },
+  "chat_log": {
+    "database_uri": ""
+  }
+}

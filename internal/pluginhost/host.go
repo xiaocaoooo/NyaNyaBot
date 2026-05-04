@@ -51,7 +51,7 @@ type Host struct {
 	getPluginConfig func() map[string]json.RawMessage
 	getGlobals      func() map[string]string
 
-	callOneBot func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
+	callOneBot func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error)
 	getStats   func(ctx context.Context) (transport.GetStatsReply, error)
 
 	// 追踪系统
@@ -61,7 +61,7 @@ type Host struct {
 	logger          *slog.Logger
 }
 
-func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
 	if getPluginConfig == nil {
 		getPluginConfig = func() map[string]json.RawMessage { return nil }
 	}
@@ -152,12 +152,12 @@ func (h *Host) GenerateTraceID() string {
 type hostAPI struct {
 	host           *Host
 	callerPluginID string
-	call           func(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
+	call           func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error)
 	callDependency func(ctx context.Context, callerPluginID string, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *papi.StructuredError)
 	getStats       func(ctx context.Context) (transport.GetStatsReply, error)
 }
 
-func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error) {
+func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error) {
 	if h.call == nil {
 		return ob11.APIResponse{}, errors.New("host onebot callback is not configured")
 	}
@@ -170,6 +170,7 @@ func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, trac
 				"plugin_id", h.callerPluginID,
 				"listener_id", record.ListenerID,
 				"action", action,
+				"self_id", selfID,
 				"type", record.Type,
 			)
 		}
@@ -177,7 +178,7 @@ func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, trac
 		h.host.IncPluginSent(h.callerPluginID)
 	}
 
-	return h.call(ctx, action, params, traceID)
+	return h.call(ctx, action, params, selfID, traceID)
 }
 
 func (h hostAPI) CallDependency(ctx context.Context, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *papi.StructuredError) {

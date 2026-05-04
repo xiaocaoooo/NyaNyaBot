@@ -77,7 +77,7 @@ func (s *Store) Reconnect(ctx context.Context, uri string) error {
 	return nil
 }
 
-// createTable 创建表和索引
+// createTable 创建表和索引，并对已有表执行 schema 迁移
 func (s *Store) createTable(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS group_message_logs (
@@ -89,8 +89,13 @@ func (s *Store) createTable(ctx context.Context, pool *pgxpool.Pool) error {
 			raw_message TEXT NOT NULL DEFAULT '',
 			message_segments JSONB NOT NULL DEFAULT '[]'::jsonb,
 			recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			self_id BIGINT NOT NULL DEFAULT 0,
 			CONSTRAINT group_message_logs_group_real_seq_key UNIQUE (group_id, real_seq)
 		);
+
+		-- 对已有表添加 self_id 列（如果不存在）
+		ALTER TABLE group_message_logs 
+			ADD COLUMN IF NOT EXISTS self_id BIGINT NOT NULL DEFAULT 0;
 
 		CREATE INDEX IF NOT EXISTS idx_group_message_logs_group_id 
 			ON group_message_logs (group_id);
@@ -100,6 +105,9 @@ func (s *Store) createTable(ctx context.Context, pool *pgxpool.Pool) error {
 		
 		CREATE INDEX IF NOT EXISTS idx_group_message_logs_user_id 
 			ON group_message_logs (user_id);
+		
+		CREATE INDEX IF NOT EXISTS idx_group_message_logs_self_id 
+			ON group_message_logs (self_id);
 	`)
 	return err
 }
@@ -129,11 +137,11 @@ func (s *Store) SaveBatch(ctx context.Context, messages []GroupMessage) error {
 
 		batch.Queue(`
 			INSERT INTO group_message_logs 
-				(group_id, real_seq, group_name, user_id, user_display_name, raw_message, message_segments, recorded_at)
+				(group_id, real_seq, group_name, user_id, user_display_name, raw_message, message_segments, recorded_at, self_id)
 			VALUES 
-				($1, $2, $3, $4, $5, $6, $7, $8)
+				($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT ON CONSTRAINT group_message_logs_group_real_seq_key DO NOTHING
-		`, msg.GroupID, msg.RealSeq, msg.GroupName, msg.UserID, msg.UserDisplayName, msg.RawMessage, segmentsJSON, msg.RecordedAt)
+		`, msg.GroupID, msg.RealSeq, msg.GroupName, msg.UserID, msg.UserDisplayName, msg.RawMessage, segmentsJSON, msg.RecordedAt, msg.SelfID)
 	}
 
 	results := pool.SendBatch(ctx, batch)

@@ -88,12 +88,11 @@ func (e *Echo) Invoke(ctx context.Context, method string, paramsJSON json.RawMes
 }
 
 func (e *Echo) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
-	_ = ctx
 	switch listenerID {
 	case "cmd.echo":
-		return e.handleEcho(eventRaw, match)
+		return e.handleEcho(ctx, eventRaw, match)
 	case "cmd.echo.cfg":
-		return e.handleEchoCfg(eventRaw, match)
+		return e.handleEchoCfg(ctx, eventRaw, match)
 	default:
 		return papi.HandleResult{}, nil
 	}
@@ -104,7 +103,7 @@ func (e *Echo) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (e *Echo) handleEcho(eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
+func (e *Echo) handleEcho(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {
 		return papi.HandleResult{}, nil
@@ -144,11 +143,11 @@ func (e *Echo) handleEcho(eventRaw ob11.Event, match *papi.CommandMatch) (papi.H
 		text = prefix + text
 	}
 
-	sendMessage(host, msgType, evt, text)
+	sendMessage(ctx, host, msgType, evt, text)
 	return papi.HandleResult{}, nil
 }
 
-func (e *Echo) handleEchoCfg(eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
+func (e *Echo) handleEchoCfg(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {
 		return papi.HandleResult{}, nil
@@ -162,14 +161,14 @@ func (e *Echo) handleEchoCfg(eventRaw ob11.Event, match *papi.CommandMatch) (pap
 	msgType, _ := evt["message_type"].(string)
 	pretty := match != nil && len(match.Groups) > 0 && match.Groups[0] == "pretty"
 
-	resultJSON, err := host.CallDependency(context.Background(), "external.configdump", "configdump.snapshot", map[string]any{
+	resultJSON, err := host.CallDependency(ctx, "external.configdump", "configdump.snapshot", map[string]any{
 		"pretty": pretty,
 	})
 	if err != nil {
 		if serr := papi.AsStructuredError(err); serr != nil {
-			sendMessage(host, msgType, evt, fmt.Sprintf("dep call failed: %s (%s)", serr.Message, serr.Code))
+			sendMessage(ctx, host, msgType, evt, fmt.Sprintf("dep call failed: %s (%s)", serr.Message, serr.Code))
 		} else {
-			sendMessage(host, msgType, evt, "dep call failed: "+err.Error())
+			sendMessage(ctx, host, msgType, evt, "dep call failed: "+err.Error())
 		}
 		return papi.HandleResult{}, nil
 	}
@@ -181,23 +180,23 @@ func (e *Echo) handleEchoCfg(eventRaw ob11.Event, match *papi.CommandMatch) (pap
 			reply = out.String()
 		}
 	}
-	sendMessage(host, msgType, evt, "dep result: "+reply)
+	sendMessage(ctx, host, msgType, evt, "dep result: "+reply)
 	return papi.HandleResult{}, nil
 }
 
-func sendMessage(host *transport.HostRPCClient, msgType string, evt map[string]any, text string) {
+func sendMessage(ctx context.Context, host *transport.HostRPCClient, msgType string, evt map[string]any, text string) {
 	if host == nil || text == "" {
 		return
 	}
 	if msgType == "group" {
 		groupID := evt["group_id"]
-		_, _ = host.CallOneBot(context.Background(), "send_group_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_group_msg", map[string]any{
 			"group_id": groupID,
 			"message":  text,
 		})
 	} else {
 		userID := evt["user_id"]
-		_, _ = host.CallOneBot(context.Background(), "send_private_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_private_msg", map[string]any{
 			"user_id": userID,
 			"message": text,
 		})

@@ -50,6 +50,12 @@ func ParseGroupMessage(raw ob11.Event) (*GroupMessage, error) {
 		return nil, nil // 缺少 user_id，跳过
 	}
 
+	// 提取 self_id（Bot 自身 QQ 号），缺失时默认 0
+	selfID := int64(0)
+	if selfIDRaw, ok := event["self_id"].(float64); ok {
+		selfID = int64(selfIDRaw)
+	}
+
 	// 提取 raw_message
 	rawMessage, _ := event["raw_message"].(string)
 
@@ -86,6 +92,7 @@ func ParseGroupMessage(raw ob11.Event) (*GroupMessage, error) {
 		RawMessage:      rawMessage,
 		MessageSegments: messageSegments,
 		RecordedAt:      time.Now(),
+		SelfID:          selfID,
 	}, nil
 }
 

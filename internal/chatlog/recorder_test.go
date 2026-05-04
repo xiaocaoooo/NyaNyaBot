@@ -31,6 +31,11 @@ func (m *mockOneBotCaller) CallAPI(ctx context.Context, action string, params in
 	return nil, nil
 }
 
+func (m *mockOneBotCaller) CallAPIWithBot(ctx context.Context, selfID int64, action string, params interface{}) (json.RawMessage, error) {
+	// 对于测试，直接调用 CallAPI（忽略 selfID）
+	return m.CallAPI(ctx, action, params)
+}
+
 func TestRecorder_StartStop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	caller := &mockOneBotCaller{groupInfo: make(map[int64]string)}

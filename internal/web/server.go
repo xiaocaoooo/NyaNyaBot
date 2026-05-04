@@ -15,6 +15,7 @@ import (
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
+	"github.com/xiaocaoooo/nyanyabot/internal/onebot/reversews"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 )
@@ -46,6 +47,7 @@ type Server struct {
 	store                 *config.Store
 	pm                    *plugin.Manager
 	statsProvider         StatsProvider
+	reverseWSServer       *reversews.Server
 	frontend              fs.FS
 	sessions              *sessionManager
 	onChatLogConfigChange func(context.Context, config.ChatLogConfig)
@@ -64,6 +66,10 @@ func (s *Server) SetStatsProvider(sp StatsProvider) {
 	s.statsProvider = sp
 }
 
+func (s *Server) SetReverseWSServer(rws *reversews.Server) {
+	s.reverseWSServer = rws
+}
+
 func (s *Server) SetChatLogConfigChangeHandler(fn func(context.Context, config.ChatLogConfig)) {
 	s.onChatLogConfigChange = fn
 }
@@ -77,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/globals", s.handleGlobals)
 	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/bots", s.handleBots)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
 	mux.HandleFunc("/api/plugins/", s.handlePluginSubAPI)
 
@@ -411,6 +418,132 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := s.statsProvider.Snapshot()
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// BotDTO 是前端友好的 bot 信息响应结构
+type BotDTO struct {
+	SelfID      int64      `json:"self_id"`
+	Nickname    string     `json:"nickname"`
+	Online      bool       `json:"online"`
+	RemoteAddr  string     `json:"remote_addr"`
+	ConnectedAt string     `json:"connected_at"`
+	GroupCount  int        `json:"group_count"`
+	Groups      []GroupDTO `json:"groups"`
+}
+
+// GroupDTO 是前端友好的群组信息响应结构
+type GroupDTO struct {
+	GroupID        int64  `json:"group_id"`
+	GroupName      string `json:"group_name"`
+	MemberCount    int    `json:"member_count"`
+	MaxMemberCount int    `json:"max_member_count"`
+}
+
+// StatsDTO 是前端友好的统计信息响应结构
+type StatsDTO struct {
+	RecvCount             int64  `json:"recv_count"`
+	SentCount             int64  `json:"sent_count"`
+	FilteredSelfCount     int64  `json:"filtered_self_count"`
+	FilteredNonGroupCount int64  `json:"filtered_non_group_count"`
+	DedupCount            int64  `json:"dedup_count"`
+	StartTime             string `json:"start_time"`
+	Uptime                string `json:"uptime"`
+}
+
+// BotsResponse 是 /api/bots 的响应结构
+type BotsResponse struct {
+	Bots            []BotDTO  `json:"bots"`
+	TotalBots       int       `json:"total_bots"`
+	OnlineBots      int       `json:"online_bots"`
+	TotalGroups     int       `json:"total_groups"`
+	GroupChatOnly   bool      `json:"group_chat_only"`
+	DedupeKey       string    `json:"dedupe_key"`
+	Stats           *StatsDTO `json:"stats,omitempty"`
+	GlobalRecvCount int64     `json:"global_recv_count,omitempty"`
+	GlobalSentCount int64     `json:"global_sent_count,omitempty"`
+	GlobalStartTime string    `json:"global_start_time,omitempty"`
+	GlobalUptime    string    `json:"global_uptime,omitempty"`
+}
+
+func (s *Server) handleBots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.reverseWSServer == nil {
+		writeJSON(w, http.StatusOK, BotsResponse{
+			Bots:          []BotDTO{},
+			TotalBots:     0,
+			OnlineBots:    0,
+			TotalGroups:   0,
+			GroupChatOnly: true,
+			DedupeKey:     "group_id+real_seq",
+		})
+		return
+	}
+
+	// 获取 bot 快照
+	botInfos := s.reverseWSServer.GetBots()
+
+	// 转换为前端 DTO
+	bots := make([]BotDTO, 0, len(botInfos))
+	totalGroups := 0
+
+	for _, info := range botInfos {
+		groups := make([]GroupDTO, len(info.Groups))
+		for i, g := range info.Groups {
+			groups[i] = GroupDTO{
+				GroupID:        g.GroupID,
+				GroupName:      g.GroupName,
+				MemberCount:    g.MemberCount,
+				MaxMemberCount: g.MaxMemberCount,
+			}
+		}
+
+		bots = append(bots, BotDTO{
+			SelfID:      info.SelfID,
+			Nickname:    info.Nickname,
+			Online:      true, // 在快照中的都是在线的
+			RemoteAddr:  info.RemoteAddr,
+			ConnectedAt: info.ConnectedAt.Format("2006-01-02T15:04:05Z07:00"),
+			GroupCount:  info.GroupCount,
+			Groups:      groups,
+		})
+
+		totalGroups += info.GroupCount
+	}
+
+	resp := BotsResponse{
+		Bots:          bots,
+		TotalBots:     len(bots),
+		OnlineBots:    len(bots),
+		TotalGroups:   totalGroups,
+		GroupChatOnly: true,
+		DedupeKey:     "group_id+real_seq",
+	}
+
+	// 如果有 stats provider，添加全局统计
+	if s.statsProvider != nil {
+		snap := s.statsProvider.Snapshot()
+		// 嵌套的 stats 对象（前端友好）
+		resp.Stats = &StatsDTO{
+			RecvCount:             snap.RecvCount,
+			SentCount:             snap.SentCount,
+			FilteredSelfCount:     snap.FilteredSelfCount,
+			FilteredNonGroupCount: snap.FilteredNonGroupCount,
+			DedupCount:            snap.DedupCount,
+			StartTime:             snap.StartTime.Format("2006-01-02T15:04:05Z07:00"),
+			Uptime:                snap.Uptime,
+		}
+		// 保留平铺字段以兼容现有前端
+		resp.GlobalRecvCount = snap.RecvCount
+		resp.GlobalSentCount = snap.SentCount
+		resp.GlobalStartTime = snap.StartTime.Format("2006-01-02T15:04:05Z07:00")
+		resp.GlobalUptime = snap.Uptime
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleGlobals(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ import type {
   APIError,
   AppConfig,
   AuthStatusResponse,
+  BotsResponse,
   CommandListener,
   ConfigPatch,
   CronListener,
@@ -191,5 +192,8 @@ export const apiClient = {
       ...response,
       state: normalizePluginState(response.state),
     }));
+  },
+  fetchBots() {
+    return requestJSON<BotsResponse>("/api/bots");
   },
 };

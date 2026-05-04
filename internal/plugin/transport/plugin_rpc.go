@@ -4,35 +4,54 @@ import (
 	"context"
 	"encoding/json"
 	"net/rpc"
-	"sync"
 
 	"github.com/hashicorp/go-plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	papi "github.com/xiaocaoooo/nyanyabot/internal/plugin"
 )
 
-// traceIDStorage 是线程本地存储，用于在 Handle 和 CallOneBot 之间传递 TraceID
-var traceIDStorage = struct {
-	sync.RWMutex
-	id string
-}{}
+// Context keys for self_id and trace_id
+type contextKey string
 
-func setCurrentTraceID(id string) {
-	traceIDStorage.Lock()
-	traceIDStorage.id = id
-	traceIDStorage.Unlock()
+const (
+	contextKeySelfID  contextKey = "nyanyabot_self_id"
+	contextKeyTraceID contextKey = "nyanyabot_trace_id"
+)
+
+// WithSelfID injects self_id into context
+func WithSelfID(ctx context.Context, selfID int64) context.Context {
+	return context.WithValue(ctx, contextKeySelfID, selfID)
 }
 
-func getCurrentTraceID() string {
-	traceIDStorage.RLock()
-	defer traceIDStorage.RUnlock()
-	return traceIDStorage.id
+// GetSelfID extracts self_id from context, returns 0 if not found
+func GetSelfID(ctx context.Context) int64 {
+	if ctx == nil {
+		return 0
+	}
+	if v := ctx.Value(contextKeySelfID); v != nil {
+		if selfID, ok := v.(int64); ok {
+			return selfID
+		}
+	}
+	return 0
 }
 
-func clearCurrentTraceID() {
-	traceIDStorage.Lock()
-	traceIDStorage.id = ""
-	traceIDStorage.Unlock()
+// WithTraceID injects trace_id into context
+func WithTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, contextKeyTraceID, traceID)
+}
+
+// GetTraceID extracts trace_id from context, returns empty string if not found
+func GetTraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v := ctx.Value(contextKeyTraceID); v != nil {
+		if traceID, ok := v.(string); ok {
+			return traceID
+		}
+	}
+	return ""
 }
 
 // ===== Plugin-side service (called by host) =====
@@ -67,11 +86,36 @@ func (s *PluginRPCServer) Invoke(args InvokeArgs, resp *InvokeReply) error {
 }
 
 func (s *PluginRPCServer) Handle(args HandleArgs, resp *HandleReply) error {
-	// 将 TraceID 存入线程本地存储，供后续的 CallOneBot 使用
-	setCurrentTraceID(args.TraceID)
-	defer clearCurrentTraceID()
+	// 从事件 JSON 中提取 self_id
+	var selfID int64
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(args.EventRawJSON, &eventData); err == nil {
+		if selfIDVal, ok := eventData["self_id"]; ok {
+			switch v := selfIDVal.(type) {
+			case float64:
+				selfID = int64(v)
+			case int64:
+				selfID = v
+			case int:
+				selfID = int64(v)
+			case json.Number:
+				if i, err := v.Int64(); err == nil {
+					selfID = i
+				}
+			}
+		}
+	}
 
-	r, err := s.Impl.Handle(context.Background(), args.ListenerID, args.EventRawJSON, args.Match)
+	// 构建带有 self_id 和 trace_id 的 context
+	ctx := context.Background()
+	if selfID != 0 {
+		ctx = WithSelfID(ctx, selfID)
+	}
+	if args.TraceID != "" {
+		ctx = WithTraceID(ctx, args.TraceID)
+	}
+
+	r, err := s.Impl.Handle(ctx, args.ListenerID, args.EventRawJSON, args.Match)
 	if err != nil {
 		return err
 	}
@@ -196,7 +240,7 @@ func (s *HostRPCServer) CallOneBot(args CallOneBotArgs, resp *CallOneBotReply) e
 			return err
 		}
 	}
-	r, err := s.Impl.CallOneBot(context.Background(), args.Action, params, args.TraceID)
+	r, err := s.Impl.CallOneBot(context.Background(), args.Action, params, args.SelfID, args.TraceID)
 	if err != nil {
 		return err
 	}
@@ -227,16 +271,18 @@ type HostRPCClient struct {
 }
 
 func (c *HostRPCClient) CallOneBot(ctx context.Context, action string, params any) (ob11.APIResponse, error) {
-	_ = ctx
 	b, err := json.Marshal(params)
 	if err != nil {
 		return ob11.APIResponse{}, err
 	}
 	var resp CallOneBotReply
-	// 从线程本地存储获取 TraceID
-	traceID := getCurrentTraceID()
+
+	// 从 context 中提取 TraceID 和 SelfID
+	traceID := GetTraceID(ctx)
+	selfID := GetSelfID(ctx)
+
 	// Note: when served via MuxBroker.AcceptAndServe, service name is always "Plugin".
-	if err := c.client.Call("Plugin.CallOneBot", CallOneBotArgs{Action: action, Params: b, TraceID: traceID}, &resp); err != nil {
+	if err := c.client.Call("Plugin.CallOneBot", CallOneBotArgs{Action: action, Params: b, TraceID: traceID, SelfID: selfID}, &resp); err != nil {
 		return ob11.APIResponse{}, err
 	}
 	return resp.Resp, nil

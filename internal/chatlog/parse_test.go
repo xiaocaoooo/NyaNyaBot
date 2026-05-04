@@ -11,6 +11,7 @@ func TestParseGroupMessage_Valid(t *testing.T) {
 		"message_type": "group",
 		"group_id": 123456,
 		"user_id": 789012,
+		"self_id": 111222,
 		"real_seq": 100,
 		"raw_message": "hello world",
 		"sender": {
@@ -38,6 +39,10 @@ func TestParseGroupMessage_Valid(t *testing.T) {
 
 	if msg.UserID != 789012 {
 		t.Errorf("expected user_id 789012, got %d", msg.UserID)
+	}
+
+	if msg.SelfID != 111222 {
+		t.Errorf("expected self_id 111222, got %d", msg.SelfID)
 	}
 
 	if msg.RealSeq != "100" {
@@ -308,5 +313,57 @@ func TestParseGroupMessage_RealSeqStringZero(t *testing.T) {
 
 	if msg != nil {
 		t.Error("expected nil message for real_seq '0'")
+	}
+}
+
+func TestParseGroupMessage_MissingSelfID(t *testing.T) {
+	event := json.RawMessage(`{
+		"post_type": "message",
+		"message_type": "group",
+		"group_id": 123456,
+		"user_id": 789012,
+		"real_seq": 100
+	}`)
+
+	msg, err := ParseGroupMessage(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg == nil {
+		t.Fatal("expected message, got nil")
+	}
+
+	if msg.SelfID != 0 {
+		t.Errorf("expected self_id 0 when missing, got %d", msg.SelfID)
+	}
+}
+
+func TestParseGroupMessage_SelfIDEqualUserID(t *testing.T) {
+	// 即使 self_id == user_id，也应该正常解析（过滤在 dispatcher 层）
+	event := json.RawMessage(`{
+		"post_type": "message",
+		"message_type": "group",
+		"group_id": 123456,
+		"user_id": 789012,
+		"self_id": 789012,
+		"real_seq": 100
+	}`)
+
+	msg, err := ParseGroupMessage(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg == nil {
+		t.Fatal("expected message, got nil")
+	}
+
+	if msg.SelfID != 789012 {
+		t.Errorf("expected self_id 789012, got %d", msg.SelfID)
+	}
+
+	if msg.UserID != 789012 {
+		t.Errorf("expected user_id 789012, got %d", msg.UserID)
 	}
 }

@@ -136,3 +136,50 @@ export interface AuthStatusResponse {
 export interface LoginPayload {
   password: string;
 }
+
+export interface BotGroup {
+  group_id: number;
+  group_name: string;
+  member_count: number;
+  max_member_count?: number;
+}
+
+export interface BotInfo {
+  self_id: number;
+  nickname: string;
+  online: boolean;
+  remote_addr: string;
+  connected_at: string;
+  group_count: number;
+  groups: BotGroup[];
+  recv_count?: number;
+  sent_count?: number;
+  filtered_self_count?: number;
+  filtered_non_group_count?: number;
+  dedup_count?: number;
+}
+
+export interface BotStats {
+  recv_count?: number;
+  sent_count?: number;
+  filtered_self_count?: number;
+  filtered_non_group_count?: number;
+  dedup_count?: number;
+  start_time?: string;
+  uptime?: string;
+}
+
+export interface BotsResponse {
+  group_chat_only: boolean;
+  dedupe_key: string;
+  bots: BotInfo[];
+  total_bots: number;
+  online_bots: number;
+  total_groups: number;
+  stats?: BotStats;
+  // 兼容保留的平铺字段（向后兼容）
+  global_recv_count?: number;
+  global_sent_count?: number;
+  global_start_time?: string;
+  global_uptime?: number;
+}

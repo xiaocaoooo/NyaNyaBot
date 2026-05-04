@@ -10,6 +10,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/chatlog"
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/cron"
+	"github.com/xiaocaoooo/nyanyabot/internal/dedup"
 	"github.com/xiaocaoooo/nyanyabot/internal/dispatch"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/reversews"
@@ -34,17 +35,27 @@ func (a *oneBotCallerAdapter) CallAPI(ctx context.Context, action string, params
 	return resp.Data, nil
 }
 
+func (a *oneBotCallerAdapter) CallAPIWithBot(ctx context.Context, selfID int64, action string, params interface{}) (json.RawMessage, error) {
+	resp, err := a.ob.CallWithBot(ctx, selfID, action, params)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
 type App struct {
-	Logger  *slog.Logger
-	Store   *config.Store
-	PM      *plugin.Manager
-	PH      *pluginhost.Host
-	Disp    *dispatch.Dispatcher
-	Cron    *cron.Scheduler
-	OB      *reversews.Server
-	Web     *http.Server
-	Stats   *stats.Stats
-	ChatLog *chatlog.Recorder
+	Logger         *slog.Logger
+	Store          *config.Store
+	PM             *plugin.Manager
+	PH             *pluginhost.Host
+	Disp           *dispatch.Dispatcher
+	Cron           *cron.Scheduler
+	OB             *reversews.Server
+	Web            *http.Server
+	Stats          *stats.Stats
+	ChatLog        *chatlog.Recorder
+	Deduper        *dedup.MemoryDeduper
+	dedupCleanStop chan struct{}
 }
 
 func New(ctx context.Context, logger *slog.Logger) (*App, error) {
@@ -70,12 +81,52 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	disp := dispatch.NewWithLoggerAndStats(pm, logger, st)
 	disp.SetConfigProvider(store.Get)
 
+	// Initialize deduper if enabled
+	var memDeduper *dedup.MemoryDeduper
+	var dedupCleanStop chan struct{}
+	if cfg.Dedup.Enabled {
+		ttl := time.Duration(cfg.Dedup.TTLSeconds) * time.Second
+		if ttl <= 0 {
+			ttl = 5 * time.Minute // default TTL
+		}
+		memDeduper = dedup.NewMemoryDeduper(ttl)
+		disp.SetDeduper(memDeduper)
+		logger.Info("deduper initialized",
+			"backend", cfg.Dedup.Backend,
+			"ttl", ttl,
+		)
+
+		// Start cleanup goroutine
+		dedupCleanStop = make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(10 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					memDeduper.CleanExpired()
+					logger.Debug("deduper cleanup completed")
+				case <-dedupCleanStop:
+					logger.Info("deduper cleanup stopped")
+					return
+				case <-ctx.Done():
+					logger.Info("deduper cleanup stopped (context done)")
+					return
+				}
+			}
+		}()
+	}
+
 	// Create cron scheduler
 	cronScheduler := cron.NewScheduler(pm, logger)
 	cronScheduler.SetConfigProvider(store.Get)
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
 	ob.SetStats(st)
+
+	// 设置 Bot ID 提供者（用于过滤所有 Bot 的消息）
+	disp.SetBotIDProvider(ob)
+	logger.Info("bot id provider set for dispatcher")
 
 	// Create chatlog recorder with adapter for ob.Call
 	chatRecorder := chatlog.NewRecorder(logger, &oneBotCallerAdapter{ob: ob})
@@ -110,26 +161,40 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 			out[k] = v
 		}
 		return out
-	}, func(c context.Context, action string, params any, traceID string) (ob11.APIResponse, error) {
+	}, func(c context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error) {
 		// 如果有 TraceID，记录追踪信息
 		if traceID != "" {
 			logger.Debug("plugin sending OneBot request",
 				"trace_id", traceID,
 				"action", action,
+				"self_id", selfID,
 			)
 		}
-		resp, err := ob.Call(c, action, params)
+
+		// 根据 selfID 路由到指定的 bot 连接
+		var resp ob11.APIResponse
+		var err error
+		if selfID != 0 {
+			// 指定 bot
+			resp, err = ob.CallWithBot(c, selfID, action, params)
+		} else {
+			// 兼容模式：使用默认 bot（单 bot 场景）
+			resp, err = ob.Call(c, action, params)
+		}
+
 		if traceID != "" {
 			if err != nil {
 				logger.Debug("plugin OneBot request failed",
 					"trace_id", traceID,
 					"action", action,
+					"self_id", selfID,
 					"error", err,
 				)
 			} else {
 				logger.Debug("plugin OneBot request succeeded",
 					"trace_id", traceID,
 					"action", action,
+					"self_id", selfID,
 					"status", resp.Status,
 				)
 			}
@@ -151,6 +216,7 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	webSrv := web.New(store, pm)
 	webSrv.SetStatsProvider(st)
+	webSrv.SetReverseWSServer(ob)
 	webSrv.SetChatLogConfigChangeHandler(func(ctx context.Context, chatLogCfg config.ChatLogConfig) {
 		if err := chatRecorder.Reconnect(ctx, chatLogCfg.DatabaseURI); err != nil {
 			logger.Error("chatlog runtime reconnect failed", "err", err)
@@ -163,15 +229,24 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	}
 
 	return &App{
-		Logger:  logger,
-		Store:   store,
-		PM:      pm,
-		PH:      ph,
-		Disp:    disp,
-		Cron:    cronScheduler,
-		OB:      ob,
-		Web:     httpSrv,
-		Stats:   st,
-		ChatLog: chatRecorder,
+		Logger:         logger,
+		Store:          store,
+		PM:             pm,
+		PH:             ph,
+		Disp:           disp,
+		Cron:           cronScheduler,
+		OB:             ob,
+		Web:            httpSrv,
+		Stats:          st,
+		ChatLog:        chatRecorder,
+		Deduper:        memDeduper,
+		dedupCleanStop: dedupCleanStop,
 	}, nil
+}
+
+// Shutdown stops the deduper cleanup goroutine
+func (a *App) Shutdown() {
+	if a.dedupCleanStop != nil {
+		close(a.dedupCleanStop)
+	}
 }

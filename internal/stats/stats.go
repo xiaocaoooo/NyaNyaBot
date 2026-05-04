@@ -9,19 +9,25 @@ import (
 
 // Stats 记录运行时统计信息
 type Stats struct {
-	recvCount       atomic.Int64 // 收到的消息数
-	sentCount       atomic.Int64 // 发送的消息数
-	startTime       time.Time    // 启动时间
-	pluginSentStats sync.Map     // pluginID → *atomic.Int64
+	recvCount             atomic.Int64 // 收到的消息数
+	sentCount             atomic.Int64 // 发送的消息数
+	filteredSelfCount     atomic.Int64 // 过滤的自发消息数（self_id == user_id）
+	filteredNonGroupCount atomic.Int64 // 过滤的非群聊消息数
+	dedupCount            atomic.Int64 // 去重的消息数（预留）
+	startTime             time.Time    // 启动时间
+	pluginSentStats       sync.Map     // pluginID → *atomic.Int64
 }
 
 // Snapshot 是统计信息的快照
 type Snapshot struct {
-	RecvCount       int64            `json:"recv_count"`
-	SentCount       int64            `json:"sent_count"`
-	PluginSentStats map[string]int64 `json:"plugin_sent_stats,omitempty"`
-	StartTime       time.Time        `json:"start_time"`
-	Uptime          string           `json:"uptime"`
+	RecvCount             int64            `json:"recv_count"`
+	SentCount             int64            `json:"sent_count"`
+	FilteredSelfCount     int64            `json:"filtered_self_count"`
+	FilteredNonGroupCount int64            `json:"filtered_non_group_count"`
+	DedupCount            int64            `json:"dedup_count"`
+	PluginSentStats       map[string]int64 `json:"plugin_sent_stats,omitempty"`
+	StartTime             time.Time        `json:"start_time"`
+	Uptime                string           `json:"uptime"`
 }
 
 // New 创建一个新的 Stats 实例
@@ -52,6 +58,30 @@ func (s *Stats) IncSentByPlugin(pluginID string) {
 	}
 }
 
+// IncFilteredSelf 增加过滤的自发消息计数（self_id == user_id）
+func (s *Stats) IncFilteredSelf() {
+	if s == nil {
+		return
+	}
+	s.filteredSelfCount.Add(1)
+}
+
+// IncFilteredNonGroup 增加过滤的非群聊消息计数
+func (s *Stats) IncFilteredNonGroup() {
+	if s == nil {
+		return
+	}
+	s.filteredNonGroupCount.Add(1)
+}
+
+// IncDedup 增加去重的消息计数（预留）
+func (s *Stats) IncDedup() {
+	if s == nil {
+		return
+	}
+	s.dedupCount.Add(1)
+}
+
 // GetPluginSentStats 获取各插件的发送统计
 func (s *Stats) GetPluginSentStats() map[string]int64 {
 	result := make(map[string]int64)
@@ -69,11 +99,14 @@ func (s *Stats) GetPluginSentStats() map[string]int64 {
 // Snapshot 返回当前统计信息的快照
 func (s *Stats) Snapshot() Snapshot {
 	return Snapshot{
-		RecvCount:       s.recvCount.Load(),
-		SentCount:       s.sentCount.Load(),
-		PluginSentStats: s.GetPluginSentStats(),
-		StartTime:       s.startTime,
-		Uptime:          s.FormatUptime(),
+		RecvCount:             s.recvCount.Load(),
+		SentCount:             s.sentCount.Load(),
+		FilteredSelfCount:     s.filteredSelfCount.Load(),
+		FilteredNonGroupCount: s.filteredNonGroupCount.Load(),
+		DedupCount:            s.dedupCount.Load(),
+		PluginSentStats:       s.GetPluginSentStats(),
+		StartTime:             s.startTime,
+		Uptime:                s.FormatUptime(),
 	}
 }
 

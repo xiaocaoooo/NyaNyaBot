@@ -53,10 +53,11 @@ func (p *rpcStubPlugin) Shutdown(ctx context.Context) error {
 
 type rpcStubHost struct{}
 
-func (h *rpcStubHost) CallOneBot(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error) {
+func (h *rpcStubHost) CallOneBot(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error) {
 	_ = ctx
 	_ = action
 	_ = params
+	_ = selfID
 	_ = traceID
 	return ob11.APIResponse{}, nil
 }

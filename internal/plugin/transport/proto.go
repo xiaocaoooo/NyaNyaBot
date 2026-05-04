@@ -51,6 +51,7 @@ type CallOneBotArgs struct {
 	Action  string          `json:"action"`
 	Params  json.RawMessage `json:"params"`
 	TraceID string          `json:"trace_id"`
+	SelfID  int64           `json:"self_id,omitempty"` // 可选：指定目标 bot；0 表示使用上下文推断
 }
 
 type CallOneBotReply struct {
@@ -81,7 +82,7 @@ type GetStatsReply struct {
 
 // HostAPI is implemented by host and exposed to plugin.
 type HostAPI interface {
-	CallOneBot(ctx context.Context, action string, params any, traceID string) (ob11.APIResponse, error)
+	CallOneBot(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error)
 	CallDependency(ctx context.Context, targetPluginID string, method string, params json.RawMessage) (json.RawMessage, *plugin.StructuredError)
 	GetStats(ctx context.Context) (GetStatsReply, error)
 }

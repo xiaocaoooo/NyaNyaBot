@@ -92,12 +92,11 @@ func (c *CronTimePlugin) Invoke(ctx context.Context, method string, paramsJSON j
 }
 
 func (c *CronTimePlugin) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
-	_ = ctx
 	switch listenerID {
 	case "cmd.set_group":
-		return c.handleSetGroup(eventRaw, match)
+		return c.handleSetGroup(ctx, eventRaw, match)
 	case "cron.send_time":
-		return c.handleCronTime(eventRaw)
+		return c.handleCronTime(ctx, eventRaw)
 	default:
 		return papi.HandleResult{}, nil
 	}
@@ -109,7 +108,7 @@ func (c *CronTimePlugin) Shutdown(ctx context.Context) error {
 }
 
 // handleSetGroup 处理设置群号命令
-func (c *CronTimePlugin) handleSetGroup(eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
+func (c *CronTimePlugin) handleSetGroup(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {
 		return papi.HandleResult{}, nil
@@ -134,12 +133,12 @@ func (c *CronTimePlugin) handleSetGroup(eventRaw ob11.Event, match *papi.Command
 	reply := fmt.Sprintf("已设置发送时间的群号为: %d", c.groupID)
 
 	if msgType == "group" {
-		_, _ = host.CallOneBot(context.Background(), "send_group_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_group_msg", map[string]any{
 			"group_id": groupID,
 			"message":  reply,
 		})
 	} else {
-		_, _ = host.CallOneBot(context.Background(), "send_private_msg", map[string]any{
+		_, _ = host.CallOneBot(ctx, "send_private_msg", map[string]any{
 			"user_id": userID,
 			"message": reply,
 		})
@@ -149,7 +148,7 @@ func (c *CronTimePlugin) handleSetGroup(eventRaw ob11.Event, match *papi.Command
 }
 
 // handleCronTime 处理定时任务，发送当前时间
-func (c *CronTimePlugin) handleCronTime(eventRaw ob11.Event) (papi.HandleResult, error) {
+func (c *CronTimePlugin) handleCronTime(ctx context.Context, eventRaw ob11.Event) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {
 		return papi.HandleResult{}, nil
@@ -169,7 +168,7 @@ func (c *CronTimePlugin) handleCronTime(eventRaw ob11.Event) (papi.HandleResult,
 	message := fmt.Sprintf("⏰ 当前时间：%s\n📅 星期%s", timeStr, weekday.String())
 
 	// 发送群消息
-	_, _ = host.CallOneBot(context.Background(), "send_group_msg", map[string]any{
+	_, _ = host.CallOneBot(ctx, "send_group_msg", map[string]any{
 		"group_id": c.groupID,
 		"message":  message,
 	})

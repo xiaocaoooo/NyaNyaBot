@@ -167,7 +167,7 @@ func (r *Recorder) processBatch(ctx context.Context) {
 	for _, q := range queued {
 		msg := q.Message
 		if msg.GroupName == "" {
-			msg.GroupName = r.fetchGroupName(ctx, msg.GroupID)
+			msg.GroupName = r.fetchGroupName(ctx, msg.GroupID, msg.SelfID)
 		}
 		messages = append(messages, msg)
 	}
@@ -189,7 +189,7 @@ func (r *Recorder) processBatch(ctx context.Context) {
 }
 
 // fetchGroupName 获取群名称（缓存优先，必要时调用 get_group_info）
-func (r *Recorder) fetchGroupName(ctx context.Context, groupID int64) string {
+func (r *Recorder) fetchGroupName(ctx context.Context, groupID int64, selfID int64) string {
 	// 先查缓存
 	if name, ok := r.cache.Get(groupID); ok {
 		return name
@@ -203,9 +203,9 @@ func (r *Recorder) fetchGroupName(ctx context.Context, groupID int64) string {
 		"group_id": groupID,
 	}
 
-	data, err := r.caller.CallAPI(ctx, "get_group_info", params)
+	data, err := r.caller.CallAPIWithBot(ctx, selfID, "get_group_info", params)
 	if err != nil {
-		r.logger.Warn("failed to get group info", "group_id", groupID, "error", err)
+		r.logger.Warn("failed to get group info", "group_id", groupID, "self_id", selfID, "error", err)
 		return ""
 	}
 

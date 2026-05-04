@@ -33,6 +33,10 @@ type AppConfig struct {
 	// PluginControls stores host-side runtime switches for plugins and listeners.
 	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
 	ChatLog        ChatLogConfig            `json:"chat_log"`
+	// MessageDedup enables message deduplication based on group_id + message_seq.
+	// Only applies to group messages. Defaults to true.
+	MessageDedup *bool       `json:"message_dedup,omitempty"`
+	Dedup        DedupConfig `json:"dedup"`
 }
 
 // PluginControl stores host-side enable/disable state.
@@ -67,6 +71,12 @@ type ChatLogConfig struct {
 	Queue       *ChatLogQueueConfig `json:"queue,omitempty"`
 }
 
+type DedupConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Backend    string `json:"backend"`
+	TTLSeconds int    `json:"ttl_seconds"`
+}
+
 func Default() AppConfig {
 	return AppConfig{
 		OneBot: OneBotConfig{
@@ -80,6 +90,11 @@ func Default() AppConfig {
 		Plugins:        make(map[string]json.RawMessage),
 		PluginControls: make(map[string]PluginControl),
 		ChatLog:        ChatLogConfig{DatabaseURI: ""},
+		Dedup: DedupConfig{
+			Enabled:    true,
+			Backend:    "memory",
+			TTLSeconds: 3600,
+		},
 	}
 }
 
@@ -211,10 +226,28 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		cfg.PluginControls = make(map[string]PluginControl)
 		changed = true
 	}
+	if cfg.MessageDedup == nil {
+		dedupEnabled := true
+		cfg.MessageDedup = &dedupEnabled
+		changed = true
+	}
 	normalizedControls := normalizePluginControls(cfg.PluginControls)
 	if !pluginControlsEqual(cfg.PluginControls, normalizedControls) {
 		cfg.PluginControls = normalizedControls
 		changed = true
+	}
+	// Ensure Dedup config has valid defaults.
+	if cfg.Dedup.Backend == "" {
+		cfg.Dedup.Backend = "memory"
+		changed = true
+	}
+	if cfg.Dedup.TTLSeconds <= 0 {
+		cfg.Dedup.TTLSeconds = 3600
+		changed = true
+	}
+	// Validate Dedup backend.
+	if cfg.Dedup.Backend != "memory" && cfg.Dedup.Backend != "redis" {
+		return false, errors.New("dedup backend must be 'memory' or 'redis'")
 	}
 	return changed, nil
 }
@@ -280,6 +313,15 @@ func (c AppConfig) IsCronEnabled(pluginID string, listenerID string) bool {
 		}
 	}
 	return true
+}
+
+// IsMessageDedupEnabled returns whether message deduplication is enabled.
+// Defaults to true if not explicitly set.
+func (c AppConfig) IsMessageDedupEnabled() bool {
+	if c.MessageDedup == nil {
+		return true
+	}
+	return *c.MessageDedup
 }
 
 func normalizePluginControls(in map[string]PluginControl) map[string]PluginControl {

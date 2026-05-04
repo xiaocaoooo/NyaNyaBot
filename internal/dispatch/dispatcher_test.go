@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
+	"github.com/xiaocaoooo/nyanyabot/internal/dedup"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 )
@@ -87,7 +89,7 @@ func TestDispatchSkipsDisabledPlugin(t *testing.T) {
 		},
 	}, disabledPlugin, enabledPlugin)
 
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 
 	if len(disabledPlugin.handled) != 0 {
 		t.Fatalf("expected disabled plugin to be skipped, got %#v", disabledPlugin.handled)
@@ -134,7 +136,7 @@ func TestDispatchSkipsDisabledCommandListener(t *testing.T) {
 		},
 	}, p)
 
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 
 	if !reflect.DeepEqual(p.handled, []string{"cmd.enabled"}) {
 		t.Fatalf("unexpected handled commands: %#v", p.handled)
@@ -150,7 +152,7 @@ func TestDispatchStripsGlobalPrefix(t *testing.T) {
 		MessagePrefix: `^/(?P<content>.+)$`,
 	}, p)
 
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
 		t.Fatalf("expected global prefix stripped and command matched, got %#v", p.handled)
 	}
@@ -168,7 +170,7 @@ func TestDispatchStripsPluginPrefix(t *testing.T) {
 		},
 	}, p)
 
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"#ping","message":"#ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"#ping","message":"#ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
 		t.Fatalf("expected plugin prefix override to match, got %#v", p.handled)
 	}
@@ -184,7 +186,7 @@ func TestDispatchSkipsCommandWithoutPrefixMatch(t *testing.T) {
 	}, p)
 
 	// Without matching prefix, command should be skipped
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"ping","message":"ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"ping","message":"ping"}`))
 	if len(p.handled) != 0 {
 		t.Fatalf("expected command without prefix to be skipped in strict mode, got %#v", p.handled)
 	}
@@ -200,7 +202,7 @@ func TestDispatchMatchesCommandWithPrefix(t *testing.T) {
 	}, p)
 
 	// With matching prefix, command should match
-	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"private","raw_message":"/ping","message":"/ping"}`))
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
 		t.Fatalf("expected command with prefix to match, got %#v", p.handled)
 	}
@@ -285,7 +287,9 @@ func TestDispatchInjectsContentForMixedSegments(t *testing.T) {
 
 	disp.Dispatch(context.Background(), messageEvent(`{
 		"post_type":"message",
-		"message_type":"private",
+		"message_type":"group",
+		"user_id":123,
+		"self_id":456,
 		"message":[
 			{"type":"text","data":{"text":"/hello "}},
 			{"type":"image","data":{"file":"abc.jpg"}},
@@ -366,5 +370,105 @@ func TestDispatchDoesNotInjectContentForNonMessageEvent(t *testing.T) {
 
 	if _, ok := parsed["content"]; ok {
 		t.Fatalf("expected no content field for non-message event, got: %v", parsed)
+	}
+}
+
+func TestDispatchDeduplicatesMessages(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
+	}}
+	dedupEnabled := true
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+		MessageDedup:  &dedupEnabled,
+	}, p)
+	// 设置 deduper
+	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
+
+	// 发送相同的消息两次（相同 group_id 和 message_seq）
+	msg := `{"post_type":"message","message_type":"group","group_id":"123456","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	disp.Dispatch(context.Background(), messageEvent(msg))
+	disp.Dispatch(context.Background(), messageEvent(msg))
+
+	// 第二次应该被去重，只处理一次
+	if len(p.handled) != 1 {
+		t.Fatalf("expected message to be deduplicated, got %d handlers called", len(p.handled))
+	}
+	if p.handled[0] != "cmd.test" {
+		t.Fatalf("unexpected handler called: %s", p.handled[0])
+	}
+}
+
+func TestDispatchDedupDifferentGroups(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
+	}}
+	dedupEnabled := true
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+		MessageDedup:  &dedupEnabled,
+	}, p)
+	// 设置 deduper
+	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
+
+	// 发送相同 message_seq 但不同 group_id 的消息
+	msg1 := `{"post_type":"message","message_type":"group","group_id":"111","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	msg2 := `{"post_type":"message","message_type":"group","group_id":"222","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	disp.Dispatch(context.Background(), messageEvent(msg1))
+	disp.Dispatch(context.Background(), messageEvent(msg2))
+
+	// 不同群的消息应该独立处理，不会互相去重
+	if len(p.handled) != 2 {
+		t.Fatalf("expected both messages to be processed independently, got %d handlers called", len(p.handled))
+	}
+}
+
+func TestDispatchDedupDisabled(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
+	}}
+	dedupDisabled := false
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+		MessageDedup:  &dedupDisabled,
+	}, p)
+	// 设置 deduper（即使设置了，也应该因为配置禁用而不使用）
+	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
+
+	// 发送相同的消息两次（使用不同的 message_seq 避免与其他测试冲突）
+	msg := `{"post_type":"message","message_type":"group","group_id":"999","message_seq":"999","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	disp.Dispatch(context.Background(), messageEvent(msg))
+	disp.Dispatch(context.Background(), messageEvent(msg))
+
+	// 禁用去重时，两次消息都应该被处理
+	if len(p.handled) != 2 {
+		t.Fatalf("expected both messages to be processed when dedup is disabled, got %d handlers called", len(p.handled))
+	}
+}
+
+func TestDispatchDedupNonGroupMessage(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.events",
+		Events:   []plugin.EventListener{{ID: "evt.message", Event: "message"}},
+	}}
+	dedupEnabled := true
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessageDedup: &dedupEnabled,
+	}, p)
+	// 设置 deduper
+	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
+
+	// 发送相同的私聊消息两次（message_type 不是 group）
+	msg := `{"post_type":"message","message_type":"private","user_id":"789","self_id":"456","message_seq":"100","raw_message":"hello","message":"hello"}`
+	disp.Dispatch(context.Background(), messageEvent(msg))
+	disp.Dispatch(context.Background(), messageEvent(msg))
+
+	// 非群消息不会进行去重，event listener 会处理两次
+	// 注意：去重逻辑只在 command listeners 部分生效，且只对群消息生效
+	if len(p.handled) != 2 {
+		t.Fatalf("expected non-group messages not to be deduplicated, got %d handlers called", len(p.handled))
 	}
 }
