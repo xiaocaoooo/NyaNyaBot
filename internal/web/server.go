@@ -43,11 +43,12 @@ type pluginListItem struct {
 }
 
 type Server struct {
-	store         *config.Store
-	pm            *plugin.Manager
-	statsProvider StatsProvider
-	frontend      fs.FS
-	sessions      *sessionManager
+	store                 *config.Store
+	pm                    *plugin.Manager
+	statsProvider         StatsProvider
+	frontend              fs.FS
+	sessions              *sessionManager
+	onChatLogConfigChange func(context.Context, config.ChatLogConfig)
 }
 
 // StatsProvider 提供统计信息的接口
@@ -61,6 +62,10 @@ func New(store *config.Store, pm *plugin.Manager) *Server {
 
 func (s *Server) SetStatsProvider(sp StatsProvider) {
 	s.statsProvider = sp
+}
+
+func (s *Server) SetChatLogConfigChangeHandler(fn func(context.Context, config.ChatLogConfig)) {
+	s.onChatLogConfigChange = fn
 }
 
 func (s *Server) Handler() http.Handler {
@@ -490,6 +495,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				Password   *string `json:"password"`
 			} `json:"webui"`
 			MessagePrefix *string `json:"message_prefix"`
+			ChatLog       *struct {
+				DatabaseURI *string `json:"database_uri"`
+			} `json:"chat_log"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -511,10 +519,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			if patch.MessagePrefix != nil {
 				c.MessagePrefix = strings.TrimSpace(*patch.MessagePrefix)
 			}
+			if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil {
+				c.ChatLog.DatabaseURI = strings.TrimSpace(*patch.ChatLog.DatabaseURI)
+			}
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
+		}
+		if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil && s.onChatLogConfigChange != nil {
+			s.onChatLogConfigChange(r.Context(), cfg.ChatLog)
 		}
 		writeJSON(w, http.StatusOK, cfg)
 	default:

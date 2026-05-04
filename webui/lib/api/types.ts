@@ -7,6 +7,9 @@ export interface AppConfig {
   webui: {
     listen_addr: string;
   };
+  chat_log: {
+    database_uri: string;
+  };
   globals?: Record<string, string>;
   plugins?: Record<string, unknown>;
   message_prefix?: string;
@@ -20,6 +23,9 @@ export interface ConfigPatch {
   };
   webui?: {
     listen_addr?: string;
+  };
+  chat_log?: {
+    database_uri?: string;
   };
   message_prefix?: string;
 }

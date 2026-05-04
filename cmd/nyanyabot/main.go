@@ -106,6 +106,11 @@ func main() {
 		}
 	}()
 
+	// Start ChatLog recorder if available
+	if a.ChatLog != nil {
+		a.ChatLog.Start(ctx)
+	}
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -113,6 +118,9 @@ func main() {
 	a.Cron.Stop()
 	_ = a.Web.Shutdown(shutdownCtx)
 	_ = a.OB.Shutdown(shutdownCtx)
+	if a.ChatLog != nil {
+		a.ChatLog.Stop(shutdownCtx)
+	}
 	a.PH.Close()
 }
 

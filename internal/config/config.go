@@ -32,6 +32,7 @@ type AppConfig struct {
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 	// PluginControls stores host-side runtime switches for plugins and listeners.
 	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
+	ChatLog        ChatLogConfig            `json:"chat_log"`
 }
 
 // PluginControl stores host-side enable/disable state.
@@ -57,6 +58,15 @@ type WebUIConfig struct {
 	Password   string `json:"password"`
 }
 
+type ChatLogQueueConfig struct {
+	Type string `json:"type,omitempty"`
+}
+
+type ChatLogConfig struct {
+	DatabaseURI string              `json:"database_uri"`
+	Queue       *ChatLogQueueConfig `json:"queue,omitempty"`
+}
+
 func Default() AppConfig {
 	return AppConfig{
 		OneBot: OneBotConfig{
@@ -69,6 +79,7 @@ func Default() AppConfig {
 		Globals:        make(map[string]string),
 		Plugins:        make(map[string]json.RawMessage),
 		PluginControls: make(map[string]PluginControl),
+		ChatLog:        ChatLogConfig{DatabaseURI: ""},
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/xiaocaoooo/nyanyabot/internal/chatlog"
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/cron"
 	"github.com/xiaocaoooo/nyanyabot/internal/dispatch"
@@ -20,16 +21,30 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/web"
 )
 
+// oneBotCallerAdapter adapts reversews.Server.Call to chatlog.OneBotCaller interface
+type oneBotCallerAdapter struct {
+	ob *reversews.Server
+}
+
+func (a *oneBotCallerAdapter) CallAPI(ctx context.Context, action string, params interface{}) (json.RawMessage, error) {
+	resp, err := a.ob.Call(ctx, action, params)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
 type App struct {
-	Logger *slog.Logger
-	Store  *config.Store
-	PM     *plugin.Manager
-	PH     *pluginhost.Host
-	Disp   *dispatch.Dispatcher
-	Cron   *cron.Scheduler
-	OB     *reversews.Server
-	Web    *http.Server
-	Stats  *stats.Stats
+	Logger  *slog.Logger
+	Store   *config.Store
+	PM      *plugin.Manager
+	PH      *pluginhost.Host
+	Disp    *dispatch.Dispatcher
+	Cron    *cron.Scheduler
+	OB      *reversews.Server
+	Web     *http.Server
+	Stats   *stats.Stats
+	ChatLog *chatlog.Recorder
 }
 
 func New(ctx context.Context, logger *slog.Logger) (*App, error) {
@@ -61,8 +76,21 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
 	ob.SetStats(st)
+
+	// Create chatlog recorder with adapter for ob.Call
+	chatRecorder := chatlog.NewRecorder(logger, &oneBotCallerAdapter{ob: ob})
+
+	// Connect to database if configured
+	if cfg.ChatLog.DatabaseURI != "" {
+		if err := chatRecorder.Reconnect(ctx, cfg.ChatLog.DatabaseURI); err != nil {
+			logger.Warn("chatlog initial connect failed", "err", err)
+		}
+	}
+
 	ob.SetEventHandler(func(evCtx context.Context, raw ob11.Event) {
 		_ = evCtx // per connection ctx
+		// Record event first (non-blocking)
+		chatRecorder.HandleEvent(ctx, raw)
 		// Dispatch using app ctx so plugins can continue briefly even if connection ctx is canceled.
 		disp.Dispatch(ctx, raw)
 	})
@@ -123,6 +151,11 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	webSrv := web.New(store, pm)
 	webSrv.SetStatsProvider(st)
+	webSrv.SetChatLogConfigChangeHandler(func(ctx context.Context, chatLogCfg config.ChatLogConfig) {
+		if err := chatRecorder.Reconnect(ctx, chatLogCfg.DatabaseURI); err != nil {
+			logger.Error("chatlog runtime reconnect failed", "err", err)
+		}
+	})
 	httpSrv := &http.Server{
 		Addr:              cfg.WebUI.ListenAddr,
 		Handler:           webSrv.Handler(),
@@ -130,14 +163,15 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	}
 
 	return &App{
-		Logger: logger,
-		Store:  store,
-		PM:     pm,
-		PH:     ph,
-		Disp:   disp,
-		Cron:   cronScheduler,
-		OB:     ob,
-		Web:    httpSrv,
-		Stats:  st,
+		Logger:  logger,
+		Store:   store,
+		PM:      pm,
+		PH:      ph,
+		Disp:    disp,
+		Cron:    cronScheduler,
+		OB:      ob,
+		Web:     httpSrv,
+		Stats:   st,
+		ChatLog: chatRecorder,
 	}, nil
 }

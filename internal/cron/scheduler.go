@@ -38,10 +38,10 @@ type Scheduler struct {
 // NewScheduler 创建一个新的 cron 调度器
 func NewScheduler(pm *plugin.Manager, logger *slog.Logger) *Scheduler {
 	return &Scheduler{
-		pm:        pm,
-		logger:    logger,
-		entries:   make(map[string]cron.EntryID),
-		cron:      cron.New(cron.WithSeconds()), // 支持秒级精度
+		pm:      pm,
+		logger:  logger,
+		entries: make(map[string]cron.EntryID),
+		cron:    cron.New(cron.WithSeconds()), // 支持秒级精度
 	}
 }
 
@@ -212,12 +212,12 @@ func (s *Scheduler) addCronJob(pluginID string, c plugin.CronListener) {
 // buildCronEvent 构建 cron 触发事件
 func (s *Scheduler) buildCronEvent(pluginID string, c plugin.CronListener) []byte {
 	event := map[string]any{
-		"post_type":    "cron",
-		"time":         0,
-		"self_id":      0,
-		"plugin_id":    pluginID,
-		"cron_id":      c.ID,
-		"cron_name":    c.Name,
+		"post_type":     "cron",
+		"time":          0,
+		"self_id":       0,
+		"plugin_id":     pluginID,
+		"cron_id":       c.ID,
+		"cron_name":     c.Name,
 		"cron_schedule": c.Schedule,
 	}
 	data, _ := json.Marshal(event)

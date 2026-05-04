@@ -43,7 +43,7 @@ type Server struct {
 }
 
 type session struct {
-	conn *websocket.Conn
+	conn   *websocket.Conn
 	remote string
 
 	mu      sync.Mutex

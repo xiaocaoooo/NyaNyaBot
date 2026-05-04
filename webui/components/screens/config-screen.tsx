@@ -31,6 +31,7 @@ export function ConfigScreen() {
   const { t } = useI18n();
   const [webuiAddr, setWebuiAddr] = useState("");
   const [reverseWSAddr, setReverseWSAddr] = useState("");
+  const [chatLogDatabaseURI, setChatLogDatabaseURI] = useState("");
   const [messagePrefix, setMessagePrefix] = useState("");
   const [globalsRows, setGlobalsRows] = useState<GlobalRow[]>([createRow()]);
 
@@ -50,6 +51,7 @@ export function ConfigScreen() {
       const [configRes, globalsRes] = await Promise.all([apiClient.fetchConfig(), apiClient.fetchGlobals()]);
       setWebuiAddr(configRes.webui.listen_addr ?? "");
       setReverseWSAddr(configRes.onebot.reverse_ws.listen_addr ?? "");
+      setChatLogDatabaseURI(configRes.chat_log?.database_uri ?? "");
       setMessagePrefix(configRes.message_prefix ?? "");
 
       const rows = Object.entries(globalsRes.globals ?? {}).map(([key, value]) => ({
@@ -109,6 +111,9 @@ export function ConfigScreen() {
         },
         webui: {
           listen_addr: webuiAddr.trim(),
+        },
+        chat_log: {
+          database_uri: chatLogDatabaseURI.trim(),
         },
       });
       setStatus(t("config.statusSaveBasic"));
@@ -214,6 +219,18 @@ export function ConfigScreen() {
                 placeholder="0.0.0.0:3001"
                 value={reverseWSAddr}
                 onValueChange={setReverseWSAddr}
+              />
+            </FormField>
+
+            <FormField
+              description={t("config.chatLogDatabaseDesc")}
+              label={t("config.chatLogDatabaseLabel")}
+            >
+              <AppInput
+                aria-label={t("config.chatLogDatabaseAria")}
+                placeholder="postgres://user:pass@localhost:5432/nyanyabot?sslmode=disable"
+                value={chatLogDatabaseURI}
+                onValueChange={setChatLogDatabaseURI}
               />
             </FormField>
           </AppCardBody>

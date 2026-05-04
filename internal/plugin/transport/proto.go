@@ -31,7 +31,7 @@ type HandleArgs struct {
 	ListenerID   string          `json:"listener_id"`
 	EventRawJSON json.RawMessage `json:"event_raw_json"`
 	Match        *plugin.CommandMatch
-	TraceID      string          `json:"trace_id"`
+	TraceID      string `json:"trace_id"`
 }
 
 type HandleReply = plugin.HandleResult
