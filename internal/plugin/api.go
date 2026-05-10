@@ -103,3 +103,67 @@ type HandleResult struct {
 type CallResult struct {
 	Raw ob11.APIResponse
 }
+
+// EnsureDescriptorArrays ensures all array fields in Descriptor are non-nil
+func EnsureDescriptorArrays(d *Descriptor) {
+	if d.Commands == nil {
+		d.Commands = []CommandListener{}
+	}
+	if d.Events == nil {
+		d.Events = []EventListener{}
+	}
+	if d.Crons == nil {
+		d.Crons = []CronListener{}
+	}
+	if d.Dependencies == nil {
+		d.Dependencies = []string{}
+	}
+	if d.Exports == nil {
+		d.Exports = []ExportSpec{}
+	}
+	
+	// 验证并修复 Exports 中的 ParamsSchema 字段
+	for i := range d.Exports {
+		if d.Exports[i].ParamsSchema == nil || len(d.Exports[i].ParamsSchema) == 0 {
+			d.Exports[i].ParamsSchema = json.RawMessage("{}")
+		} else {
+			var tmp interface{}
+			if err := json.Unmarshal(d.Exports[i].ParamsSchema, &tmp); err != nil {
+				d.Exports[i].ParamsSchema = json.RawMessage("{}")
+			}
+		}
+		
+		// 验证并修复 ResultSchema 字段
+		if d.Exports[i].ResultSchema == nil || len(d.Exports[i].ResultSchema) == 0 {
+			d.Exports[i].ResultSchema = json.RawMessage("{}")
+		} else {
+			var tmp interface{}
+			if err := json.Unmarshal(d.Exports[i].ResultSchema, &tmp); err != nil {
+				d.Exports[i].ResultSchema = json.RawMessage("{}")
+			}
+		}
+	}
+	
+	// 确保 Config 字段的 JSON 数据有效
+	if d.Config != nil {
+		// 验证并修复 Schema 字段
+		if d.Config.Schema == nil || len(d.Config.Schema) == 0 {
+			d.Config.Schema = json.RawMessage("{}")
+		} else {
+			var tmp interface{}
+			if err := json.Unmarshal(d.Config.Schema, &tmp); err != nil {
+				d.Config.Schema = json.RawMessage("{}")
+			}
+		}
+		
+		// 验证并修复 Default 字段
+		if d.Config.Default == nil || len(d.Config.Default) == 0 {
+			d.Config.Default = json.RawMessage("{}")
+		} else {
+			var tmp interface{}
+			if err := json.Unmarshal(d.Config.Default, &tmp); err != nil {
+				d.Config.Default = json.RawMessage("{}")
+			}
+		}
+	}
+}

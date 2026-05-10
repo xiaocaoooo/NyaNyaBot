@@ -13,6 +13,8 @@ import { AppTextarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api/client";
 import type { PluginListItem } from "@/lib/api/types";
 
+console.log('🚀 plugins-screen.tsx 文件已加载');
+
 type EditorMode = "schema" | "json";
 type JSONSchema = {
   additionalProperties?: boolean | JSONSchema;
@@ -439,6 +441,7 @@ function GlobalVariableUsageHint({ t }: { t: TranslateFn }) {
 }
 
 export function PluginsScreen() {
+  console.log('🎯 PluginsScreen 组件开始渲染');
   const { t } = useI18n();
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -846,11 +849,13 @@ export function PluginsScreen() {
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.listenerCommands")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">
-                          {selectedPlugin.commands.length === 0 ? (
+                          {(selectedPlugin?.commands ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.commands.slice(0, 6).map((command) => {
-                              const commandEnabled = selectedPlugin.state.commands[command.id] ?? true;
+                            (() => {
+                              console.log('🔍 渲染 commands 列表，数量:', selectedPlugin?.commands?.length);
+                              return (selectedPlugin?.commands ?? []).slice(0, 6).map((command) => {
+                                const commandEnabled = selectedPlugin.state.commands?.[command.id] ?? true;
                               return (
                                 <li
                                   key={command.id}
@@ -876,7 +881,8 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            })
+                            });
+                          })()
                           )}
                         </ul>
                       </div>
@@ -884,11 +890,13 @@ export function PluginsScreen() {
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.listenerEvents")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">
-                          {selectedPlugin.events.length === 0 ? (
+                          {(selectedPlugin?.events ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.events.slice(0, 6).map((event) => {
-                              const eventEnabled = selectedPlugin.state.events[event.id] ?? true;
+                            (() => {
+                              console.log('🔍 渲染 events 列表，数量:', selectedPlugin?.events?.length);
+                              return (selectedPlugin?.events ?? []).slice(0, 6).map((event) => {
+                                const eventEnabled = selectedPlugin.state.events?.[event.id] ?? true;
                               return (
                                 <li
                                   key={event.id}
@@ -914,7 +922,8 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            })
+                            });
+                          })()
                           )}
                         </ul>
                       </div>
@@ -922,11 +931,13 @@ export function PluginsScreen() {
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.listenerCrons")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">
-                          {selectedPlugin.crons.length === 0 ? (
+                          {(selectedPlugin?.crons ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.crons.slice(0, 6).map((cron) => {
-                              const cronEnabled = selectedPlugin.state.crons[cron.id] ?? true;
+                            (() => {
+                              console.log('🔍 渲染 crons 列表，数量:', selectedPlugin?.crons?.length);
+                              return (selectedPlugin?.crons ?? []).slice(0, 6).map((cron) => {
+                                const cronEnabled = selectedPlugin.state.crons?.[cron.id] ?? true;
                               return (
                                 <li
                                   key={cron.id}
@@ -952,7 +963,8 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            })
+                            });
+                          })()
                           )}
                         </ul>
                       </div>
@@ -960,14 +972,17 @@ export function PluginsScreen() {
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.dependencyList")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">
-                          {selectedPlugin.dependencies.length === 0 ? (
+                          {(selectedPlugin?.dependencies ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.dependencies.slice(0, 6).map((dependency) => (
-                              <li key={dependency}>
-                                <p className="font-mono text-xs">{dependency}</p>
-                              </li>
-                            ))
+                            (() => {
+                              console.log('🔍 渲染 dependencies 列表，数量:', selectedPlugin?.dependencies?.length);
+                              return (selectedPlugin?.dependencies ?? []).slice(0, 6).map((dependency) => (
+                                <li key={dependency}>
+                                  <p className="font-mono text-xs">{dependency}</p>
+                                </li>
+                              ));
+                            })()
                           )}
                         </ul>
                       </div>
@@ -975,15 +990,18 @@ export function PluginsScreen() {
                       <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <p className="text-sm font-medium text-text">{t("plugins.exportList")}</p>
                         <ul className="mt-2 space-y-2 text-sm text-muted">
-                          {selectedPlugin.exports.length === 0 ? (
+                          {(selectedPlugin?.exports ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            selectedPlugin.exports.slice(0, 6).map((spec) => (
-                              <li key={spec.name}>
-                                <p className="font-medium text-text">{spec.name}</p>
-                                <p className="text-xs text-muted">{spec.description || "-"}</p>
-                              </li>
-                            ))
+                            (() => {
+                              console.log('🔍 渲染 exports 列表，数量:', selectedPlugin?.exports?.length);
+                              return (selectedPlugin?.exports ?? []).slice(0, 6).map((spec) => (
+                                <li key={spec.name}>
+                                  <p className="font-medium text-text">{spec.name}</p>
+                                  <p className="text-xs text-muted">{spec.description || "-"}</p>
+                                </li>
+                              ));
+                            })()
                           )}
                         </ul>
                       </div>

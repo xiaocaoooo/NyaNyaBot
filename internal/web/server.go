@@ -491,14 +491,14 @@ func (s *Server) handleBots(w http.ResponseWriter, r *http.Request) {
 	totalGroups := 0
 
 	for _, info := range botInfos {
-		groups := make([]GroupDTO, len(info.Groups))
-		for i, g := range info.Groups {
-			groups[i] = GroupDTO{
+		groups := make([]GroupDTO, 0, len(info.Groups))
+		for _, g := range info.Groups {
+			groups = append(groups, GroupDTO{
 				GroupID:        g.GroupID,
 				GroupName:      g.GroupName,
 				MemberCount:    g.MemberCount,
 				MaxMemberCount: g.MaxMemberCount,
-			}
+			})
 		}
 
 		bots = append(bots, BotDTO{
@@ -594,8 +594,10 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	fmt.Printf("DEBUG: handlePlugins called\n")
 	cfg := s.store.Get()
 	plugins := s.pm.List()
+	fmt.Printf("DEBUG: plugins count: %d\n", len(plugins))
 	sort.Slice(plugins, func(i int, j int) bool {
 		if plugins[i].Name == plugins[j].Name {
 			return plugins[i].PluginID < plugins[j].PluginID
@@ -604,10 +606,17 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	})
 	items := make([]pluginListItem, 0, len(plugins))
 	for _, desc := range plugins {
+		// 确保所有数组字段非 nil
+		plugin.EnsureDescriptorArrays(&desc)
+		
 		items = append(items, pluginListItem{
 			Descriptor: desc,
 			State:      buildPluginState(cfg, desc),
 		})
+	}
+	fmt.Printf("DEBUG: about to write JSON, items count: %d\n", len(items))
+	if len(items) > 0 {
+		fmt.Printf("DEBUG: first item: %+v\n", items[0])
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -674,5 +683,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		fmt.Printf("ERROR: JSON encode failed: %v\n", err)
+	}
 }

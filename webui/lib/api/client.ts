@@ -2,6 +2,8 @@ import type {
   APIError,
   AppConfig,
   AuthStatusResponse,
+  BotGroup,
+  BotInfo,
   BotsResponse,
   CommandListener,
   ConfigPatch,
@@ -59,11 +61,24 @@ async function requestJSON<T>(input: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    const maybeError = (data as APIError | null)?.error;
+    const errorMessage = maybeError ?? `Request failed with status ${response.status}`;
+    
+    // 输出详细错误信息到控制台
+    console.error('=== API Request Error ===');
+    console.error('URL:', input);
+    console.error('Status:', response.status);
+    console.error('Status Text:', response.statusText);
+    console.error('Error Message:', errorMessage);
+    console.error('Response Data:', data);
+    console.error('Timestamp:', new Date().toISOString());
+    console.error('========================');
+    
     if (response.status === 401 && !shouldSkipUnauthorizedRedirect(input)) {
       redirectToLogin();
     }
-    const maybeError = (data as APIError | null)?.error;
-    throw new Error(maybeError ?? `Request failed with status ${response.status}`);
+    
+    throw new Error(errorMessage);
   }
 
   return data as T;
@@ -134,6 +149,13 @@ function normalizePluginListItem(
   };
 }
 
+function normalizeBotInfo(bot: BotInfo & { groups?: BotGroup[] | null }): BotInfo {
+  return {
+    ...bot,
+    groups: ensureArray(bot.groups),
+  };
+}
+
 export const apiClient = {
   login(payload: LoginPayload) {
     return requestJSON<{ ok: boolean }>("/api/auth/login", {
@@ -194,6 +216,9 @@ export const apiClient = {
     }));
   },
   fetchBots() {
-    return requestJSON<BotsResponse>("/api/bots");
+    return requestJSON<BotsResponse>("/api/bots").then((response) => ({
+      ...response,
+      bots: (response.bots ?? []).map(normalizeBotInfo),
+    }));
   },
 };

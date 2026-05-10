@@ -54,7 +54,7 @@ export function DashboardScreen() {
 
   const configuredPluginCount = useMemo(() => Object.keys(config?.plugins ?? {}).length, [config]);
 
-  // 优先使用 stats，若不存在则 fallback 到平铺的 global_* 字段
+  // 优先使用 stats,若不存在则 fallback 到平铺的 global_* 字段
   const globalStats = useMemo(() => {
     if (!bots) return null;
     if (bots.stats) return bots.stats;
@@ -69,6 +69,8 @@ export function DashboardScreen() {
       dedup_count: undefined,
     };
   }, [bots]);
+
+  const botsList = useMemo(() => bots?.bots ?? [], [bots]);
 
   return (
     <section className="space-y-6">
@@ -123,8 +125,11 @@ export function DashboardScreen() {
                   <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">{t("dashboard.noPlugins")}</p>
                 ) : (
                   <ul className="space-y-2">
-                    {plugins.slice(0, 6).map((plugin) => (
-                      <li key={plugin.plugin_id} className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
+                    {plugins.slice(0, 6).map((plugin) => {
+                      const commands = plugin.commands ?? [];
+                      const events = plugin.events ?? [];
+                      return (
+                        <li key={plugin.plugin_id} className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <p className="font-medium text-text">{plugin.name}</p>
@@ -134,15 +139,16 @@ export function DashboardScreen() {
                           </div>
                           <div className="flex items-center gap-2">
                             <Chip radius="sm" size="sm" variant="flat">
-                              {t("dashboard.commandsCount", { count: plugin.commands.length })}
+                              {t("dashboard.commandsCount", { count: commands.length })}
                             </Chip>
                             <Chip radius="sm" size="sm" variant="flat">
-                              {t("dashboard.eventsCount", { count: plugin.events.length })}
+                              {t("dashboard.eventsCount", { count: events.length })}
                             </Chip>
                           </div>
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 )}
                 <Divider className="my-2 bg-border/70" />
@@ -167,10 +173,12 @@ export function DashboardScreen() {
                   </Chip>
                 </div>
 
-                {bots?.bots && bots.bots.length > 0 ? (
+                {botsList.length > 0 ? (
                   <ul className="space-y-3">
-                    {bots.bots.map((bot) => (
-                      <li key={bot.self_id} className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
+                    {botsList.map((bot) => {
+                      const groups = bot.groups ?? [];
+                      return (
+                        <li key={bot.self_id} className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
@@ -202,19 +210,19 @@ export function DashboardScreen() {
                             )}
                           </div>
 
-                          {bot.groups && bot.groups.length > 0 && (
+                          {groups.length > 0 && (
                             <div className="space-y-1">
                               <p className="text-xs font-medium text-muted">{t("dashboard.groups")}:</p>
                               <div className="flex flex-wrap gap-1">
-                                {bot.groups.slice(0, 5).map((group) => (
+                                {groups.slice(0, 5).map((group) => (
                                   <Chip key={group.group_id} radius="sm" size="sm" variant="bordered">
                                     {group.group_name} ({group.member_count}
                                     {group.max_member_count ? `/${group.max_member_count}` : ""})
                                   </Chip>
                                 ))}
-                                {bot.groups.length > 5 && (
+                                {groups.length > 5 && (
                                   <Chip radius="sm" size="sm" variant="bordered">
-                                    {t("dashboard.moreGroups", { count: bot.groups.length - 5 })}
+                                    {t("dashboard.moreGroups", { count: groups.length - 5 })}
                                   </Chip>
                                 )}
                               </div>
@@ -244,7 +252,8 @@ export function DashboardScreen() {
                           )}
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">{t("dashboard.noBots")}</p>
