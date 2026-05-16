@@ -1,15 +1,16 @@
 "use client";
 
 import { Chip, Divider, Spinner } from "@heroui/react";
-import { RefreshCw } from "lucide-react";
+import { Activity, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { AppButton } from "@/components/ui/button";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { AppCard, AppCardBody, AppCardHeader } from "@/components/ui/card";
 import { StatusMessage } from "@/components/ui/status-message";
 import { apiClient } from "@/lib/api/client";
-import type { AppConfig, BotsResponse, PluginDescriptor } from "@/lib/api/types";
+import type { AppConfig, BotsResponse, PluginDescriptor, TriggerStatistics } from "@/lib/api/types";
 
 function StatItem({ label, value }: { label: string; value: string | number }) {
   return (
@@ -25,6 +26,7 @@ export function DashboardScreen() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
   const [bots, setBots] = useState<BotsResponse | null>(null);
+  const [triggerStats, setTriggerStats] = useState<TriggerStatistics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,14 +35,16 @@ export function DashboardScreen() {
     setError(null);
 
     try {
-      const [configData, pluginData, botsData] = await Promise.all([
+      const [configData, pluginData, botsData, triggerStatsData] = await Promise.all([
         apiClient.fetchConfig(),
         apiClient.fetchPlugins(),
         apiClient.fetchBots(),
+        apiClient.getTriggerLogStats().catch(() => null),
       ]);
       setConfig(configData);
       setPlugins(pluginData);
       setBots(botsData);
+      setTriggerStats(triggerStatsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("dashboard.errorLoad"));
     } finally {
@@ -305,6 +309,46 @@ export function DashboardScreen() {
                   </>
                 )}
               </div>
+            </AppCardBody>
+          </AppCard>
+
+          <AppCard>
+            <AppCardHeader>
+              <h2 className="text-lg font-semibold text-text">{t("dashboard.triggerLogsTitle")}</h2>
+              <p className="text-sm text-muted">{t("dashboard.triggerLogsDesc")}</p>
+            </AppCardHeader>
+            <AppCardBody>
+              {triggerStats ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <StatItem label={t("dashboard.triggerLogsTotal")} value={triggerStats.total_count} />
+                    <StatItem label={t("dashboard.triggerLogsSuccess")} value={triggerStats.success_count} />
+                    <StatItem label={t("dashboard.triggerLogsFailed")} value={triggerStats.failed_count} />
+                    <StatItem label={t("dashboard.triggerLogsAvgDuration")} value={`${triggerStats.avg_duration_ms.toFixed(2)}ms`} />
+                  </div>
+                  <Divider className="my-2 bg-border/70" />
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted">{t("dashboard.triggerLogsHint")}</p>
+                    <Link href="/trigger-logs">
+                      <AppButton size="sm" tone="primary" startContent={<Activity className="h-4 w-4" />}>
+                        {t("dashboard.triggerLogsViewAll")}
+                      </AppButton>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">{t("dashboard.triggerLogsNoData")}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted">{t("dashboard.triggerLogsHint")}</p>
+                    <Link href="/trigger-logs">
+                      <AppButton size="sm" tone="primary" startContent={<Activity className="h-4 w-4" />}>
+                        {t("dashboard.triggerLogsViewAll")}
+                      </AppButton>
+                    </Link>
+                  </div>
+                </div>
+              )}
             </AppCardBody>
           </AppCard>
         </div>

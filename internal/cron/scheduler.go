@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
 )
 
 // TraceProvider 提供追踪功能的接口
@@ -26,22 +28,24 @@ type TraceIDSetter interface {
 
 // Scheduler 管理插件的 cron 触发器
 type Scheduler struct {
-	pm            *plugin.Manager
-	logger        *slog.Logger
-	cron          *cron.Cron
-	mu            sync.RWMutex
-	entries       map[string]cron.EntryID // key: pluginID:cronID
-	getConfig     func() config.AppConfig
-	traceProvider TraceProvider
+	pm              *plugin.Manager
+	logger          *slog.Logger
+	cron            *cron.Cron
+	mu              sync.RWMutex
+	entries         map[string]cron.EntryID // key: pluginID:cronID
+	getConfig       func() config.AppConfig
+	traceProvider   TraceProvider
+	triggerRecorder *triggerlog.Recorder
 }
 
 // NewScheduler 创建一个新的 cron 调度器
-func NewScheduler(pm *plugin.Manager, logger *slog.Logger) *Scheduler {
+func NewScheduler(pm *plugin.Manager, logger *slog.Logger, recorder *triggerlog.Recorder) *Scheduler {
 	return &Scheduler{
-		pm:      pm,
-		logger:  logger,
-		entries: make(map[string]cron.EntryID),
-		cron:    cron.New(cron.WithSeconds()), // 支持秒级精度
+		pm:              pm,
+		logger:          logger,
+		entries:         make(map[string]cron.EntryID),
+		cron:            cron.New(cron.WithSeconds()), // 支持秒级精度
+		triggerRecorder: recorder,
 	}
 }
 
@@ -159,14 +163,22 @@ func (s *Scheduler) addCronJob(pluginID string, c plugin.CronListener) {
 
 		// 生成 TraceID 并注册追踪记录
 		traceID := ""
+		var startTime time.Time
 		if s.traceProvider != nil {
 			traceID = s.traceProvider.GenerateTraceID()
+			startTime = time.Now()
 			traceData := map[string]interface{}{
 				"schedule":  c.Schedule,
 				"cron_name": c.Name,
 			}
 			s.traceProvider.BeginTrace(traceID, pluginID, c.ID, "cron", traceData)
-			defer s.traceProvider.EndTrace(traceID)
+			defer func() {
+				s.traceProvider.EndTrace(traceID)
+				// 如果有 recorder，记录到 triggerlog
+				if s.triggerRecorder != nil {
+					s.recordCronTrace(pluginID, c, startTime)
+				}
+			}()
 		}
 
 		// 设置 TraceID（如果插件支持）
@@ -262,4 +274,40 @@ type CronEntryInfo struct {
 	NextRun   any
 	PrevRun   any
 	Effective bool
+}
+
+// recordCronTrace 记录 cron 触发日志
+func (s *Scheduler) recordCronTrace(pluginID string, c plugin.CronListener, startTime time.Time) {
+	if s.triggerRecorder == nil {
+		return
+	}
+
+	endTime := time.Now()
+	duration := endTime.Sub(startTime).Milliseconds()
+
+	// 构造 TriggerLog
+	// Cron 触发没有 group_id, user_id, message_seq，使用默认值
+	log := triggerlog.TriggerLog{
+		TriggerID:    0, // Cron 没有 trigger_id
+		TriggerName:  c.Name,
+		GroupID:      0,
+		GroupName:    "",
+		UserID:       0,
+		UserName:     "",
+		SelfID:       0,
+		MessageID:    "",
+		RawMessage:   c.Schedule, // 使用 schedule 作为 raw_message
+		MatchedText:  c.Name,     // 使用 cron_name 作为 matched_text
+		Response:     "",
+		StartTime:    startTime,
+		EndTime:      endTime,
+		Duration:     duration,
+		Success:      true, // Cron 触发默认成功
+		ErrorMessage: "",
+		CreatedAt:    endTime,
+	}
+
+	// 记录到 triggerlog
+	ctx := context.Background()
+	s.triggerRecorder.RecordTrace(ctx, log)
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	papi "github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
+	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
 )
 
 type pluginProcess interface {
@@ -58,6 +59,7 @@ type Host struct {
 	muTrace         sync.RWMutex
 	traceRecords    map[string]*TraceRecord
 	pluginSentStats map[string]*atomic.Int64
+	triggerRecorder *triggerlog.Recorder
 	logger          *slog.Logger
 }
 
@@ -95,11 +97,139 @@ func (h *Host) BeginTrace(traceID, pluginID, listenerID, traceType string, data 
 	}
 }
 
+// SetTriggerRecorder 设置触发记录器
+func (h *Host) SetTriggerRecorder(recorder *triggerlog.Recorder) {
+	h.muTrace.Lock()
+	defer h.muTrace.Unlock()
+	h.triggerRecorder = recorder
+}
+
 // EndTrace 结束追踪记录
 func (h *Host) EndTrace(traceID string) {
 	h.muTrace.Lock()
-	defer h.muTrace.Unlock()
+	record, ok := h.traceRecords[traceID]
 	delete(h.traceRecords, traceID)
+	recorder := h.triggerRecorder
+	h.muTrace.Unlock()
+
+	// 如果有 recorder 且记录存在，则记录到 triggerlog
+	if ok && recorder != nil && record != nil {
+		h.recordToTriggerLog(record)
+	}
+}
+
+// recordToTriggerLog 将 TraceRecord 转换为 TriggerLog 并记录
+func (h *Host) recordToTriggerLog(record *TraceRecord) {
+	if record == nil {
+		return
+	}
+
+	// 从 Data 中提取字段
+	var (
+		triggerID   int64
+		triggerName string
+		groupID     int64
+		groupName   string
+		userID      int64
+		userName    string
+		selfID      int64
+		messageID   string
+		rawMessage  string
+		matchedText string
+		response    string
+		success     bool
+		errorMsg    string
+	)
+
+	// 提取基础字段
+	if v, ok := record.Data["trigger_id"].(int64); ok {
+		triggerID = v
+	} else if v, ok := record.Data["trigger_id"].(float64); ok {
+		triggerID = int64(v)
+	}
+
+	if v, ok := record.Data["trigger_name"].(string); ok {
+		triggerName = v
+	}
+
+	if v, ok := record.Data["group_id"].(int64); ok {
+		groupID = v
+	} else if v, ok := record.Data["group_id"].(float64); ok {
+		groupID = int64(v)
+	}
+
+	if v, ok := record.Data["group_name"].(string); ok {
+		groupName = v
+	}
+
+	if v, ok := record.Data["user_id"].(int64); ok {
+		userID = v
+	} else if v, ok := record.Data["user_id"].(float64); ok {
+		userID = int64(v)
+	}
+
+	if v, ok := record.Data["user_name"].(string); ok {
+		userName = v
+	}
+
+	if v, ok := record.Data["self_id"].(int64); ok {
+		selfID = v
+	} else if v, ok := record.Data["self_id"].(float64); ok {
+		selfID = int64(v)
+	}
+
+	if v, ok := record.Data["message_id"].(string); ok {
+		messageID = v
+	}
+
+	if v, ok := record.Data["raw_message"].(string); ok {
+		rawMessage = v
+	}
+
+	if v, ok := record.Data["matched_text"].(string); ok {
+		matchedText = v
+	}
+
+	if v, ok := record.Data["response"].(string); ok {
+		response = v
+	}
+
+	if v, ok := record.Data["success"].(bool); ok {
+		success = v
+	}
+
+	if v, ok := record.Data["error"].(string); ok {
+		errorMsg = v
+	}
+
+	// 计算执行时长
+	endTime := time.Now()
+	duration := endTime.Sub(record.StartTime).Milliseconds()
+
+	// 构造 TriggerLog
+	log := triggerlog.TriggerLog{
+		TriggerID:    triggerID,
+		TriggerName:  triggerName,
+		GroupID:      groupID,
+		GroupName:    groupName,
+		UserID:       userID,
+		UserName:     userName,
+		SelfID:       selfID,
+		MessageID:    messageID,
+		RawMessage:   rawMessage,
+		MatchedText:  matchedText,
+		Response:     response,
+		StartTime:    record.StartTime,
+		EndTime:      endTime,
+		Duration:     duration,
+		Success:      success,
+		ErrorMessage: errorMsg,
+		CreatedAt:    endTime,
+	}
+
+	// 记录到 triggerlog
+	ctx := context.Background()
+	h.triggerRecorder.RecordTrace(ctx, log)
 }
 
 // GetTraceRecord 获取追踪记录

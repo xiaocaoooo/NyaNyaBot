@@ -37,6 +37,9 @@ function isNavActive(itemHref: string, currentPathname: string): boolean {
   if (item === "/config") {
     return current === item || current.startsWith("/config/") || current === "/globals" || current.startsWith("/globals/");
   }
+  if (item === "/trigger-logs") {
+    return current === item || current.startsWith("/trigger-logs/");
+  }
   return current === item;
 }
 

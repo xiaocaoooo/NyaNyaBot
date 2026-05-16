@@ -13,7 +13,9 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/dedup"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
+	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
 )
 
 // TraceProvider 提供追踪功能的接口
@@ -34,13 +36,14 @@ type BotIDProvider interface {
 }
 
 type Dispatcher struct {
-	pm            *plugin.Manager
-	logger        *slog.Logger
-	stats         *stats.Stats
-	getConfig     func() config.AppConfig
-	traceProvider TraceProvider
-	deduper       dedup.Deduper
-	botIDProvider BotIDProvider
+	pm              *plugin.Manager
+	logger          *slog.Logger
+	stats           *stats.Stats
+	getConfig       func() config.AppConfig
+	traceProvider   TraceProvider
+	deduper         dedup.Deduper
+	botIDProvider   BotIDProvider
+	triggerRecorder *triggerlog.Recorder
 }
 
 func New(pm *plugin.Manager) *Dispatcher {
@@ -59,6 +62,19 @@ func NewWithLoggerAndStats(pm *plugin.Manager, logger *slog.Logger, s *stats.Sta
 		logger = slog.Default()
 	}
 	return &Dispatcher{pm: pm, logger: logger, stats: s}
+}
+
+// NewDispatcher 创建 Dispatcher 实例（接收 recorder 参数）
+func NewDispatcher(pm *plugin.Manager, logger *slog.Logger, s *stats.Stats, recorder *triggerlog.Recorder) *Dispatcher {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Dispatcher{
+		pm:              pm,
+		logger:          logger,
+		stats:           s,
+		triggerRecorder: recorder,
+	}
 }
 
 func (d *Dispatcher) SetConfigProvider(fn func() config.AppConfig) {
@@ -153,6 +169,60 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 					d.traceProvider.BeginTrace(traceID, pid, l.ID, "event", traceData)
 					defer d.traceProvider.EndTrace(traceID)
 				}
+
+				// 触发记录：BeginTrace（旧表）
+				var recorderTraceID string
+				if d.triggerRecorder != nil {
+					selfID := transport.GetSelfID(ctx)
+					groupIDInt := parseIntOrZero(groupID)
+					userIDInt := parseIntOrZero(userID)
+
+					recorderTraceID = d.triggerRecorder.BeginTrace(
+						ctx,
+						0,          // triggerID - Event 没有数字 ID，使用 0
+						l.ID,       // triggerName - 使用 listenerID
+						groupIDInt, // groupID
+						"",         // groupName - 暂时为空
+						userIDInt,  // userID
+						"",         // userName - 暂时为空
+						selfID,     // selfID
+						messageSeq, // messageID
+						rawMsg,     // rawMessage
+						fmt.Sprintf("event_type=%s, sub_type=%s", eventKey, eventKeyFull), // matchedText
+					)
+				}
+
+				// 插件触发记录：BeginPluginTrace（新表）
+				var pluginTraceID string
+				if d.triggerRecorder != nil {
+					selfID := transport.GetSelfID(ctx)
+					groupIDInt := parseIntOrZero(groupID)
+					userIDInt := parseIntOrZero(userID)
+					messageIDInt := parseIntOrZero(messageSeq)
+
+					// 构建 triggerData
+					triggerData := map[string]interface{}{
+						"event_type": eventKey,
+						"sub_type":   eventKeyFull,
+					}
+					if rawMsg != "" {
+						triggerData["raw_message"] = rawMsg
+					}
+
+					pluginTraceID = d.triggerRecorder.BeginPluginTrace(
+						ctx,
+						pid,         // pluginID
+						l.ID,        // listenerID
+						"event",     // listenerType
+						groupIDInt,  // groupID
+						userIDInt,   // userID
+						selfID,      // selfID
+						messageIDInt, // messageID
+						messageSeq,  // messageSeq
+						triggerData, // triggerData
+					)
+				}
+
 				// 设置 TraceID（如果插件支持）
 				if setter, ok := p.(TraceIDSetter); ok {
 					setter.SetTraceID(traceID)
@@ -164,7 +234,29 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 					eventRaw = injectContentFieldWithValue(raw, content)
 				}
 				// no match info
-				_, _ = p.Handle(ctx, l.ID, eventRaw, nil)
+				_, handleErr := p.Handle(ctx, l.ID, eventRaw, nil)
+
+				// 触发记录：EndTrace（旧表）
+				if d.triggerRecorder != nil && recorderTraceID != "" {
+					success := handleErr == nil
+					errorMsg := ""
+					if handleErr != nil {
+						errorMsg = handleErr.Error()
+					}
+					// HandleResult 是结构体，不需要序列化
+					responseStr := ""
+					d.triggerRecorder.EndTrace(ctx, recorderTraceID, responseStr, success, errorMsg)
+				}
+
+				// 插件触发记录：EndPluginTrace（新表）
+				if d.triggerRecorder != nil && pluginTraceID != "" {
+					success := handleErr == nil
+					errorMsg := ""
+					if handleErr != nil {
+						errorMsg = handleErr.Error()
+					}
+					d.triggerRecorder.EndPluginTrace(ctx, pluginTraceID, success, errorMsg)
+				}
 			}
 		}
 	}
@@ -333,6 +425,67 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				defer d.traceProvider.EndTrace(traceID)
 			}
 
+			// 触发记录：BeginTrace（旧表）
+			var recorderTraceID string
+			if d.triggerRecorder != nil {
+				selfID := transport.GetSelfID(ctx)
+				groupIDInt := parseIntOrZero(groupID)
+				userIDInt := parseIntOrZero(userID)
+
+				// 构建 matchedText，包含详细的匹配信息
+				matchedText := fmt.Sprintf("pattern=%s, match_full=%s", c.Pattern, m[0])
+				if len(m) > 1 {
+					matchedText += fmt.Sprintf(", match_groups=%v", m[1:])
+				}
+
+				recorderTraceID = d.triggerRecorder.BeginTrace(
+					ctx,
+					0,          // triggerID - Command 没有数字 ID，使用 0
+					c.ID,       // triggerName - 使用 commandID
+					groupIDInt, // groupID
+					"",         // groupName - 暂时为空
+					userIDInt,  // userID
+					"",         // userName - 暂时为空
+					selfID,     // selfID
+					messageSeq, // messageID
+					rawMsg,     // rawMessage
+					matchedText,
+				)
+			}
+
+			// 插件触发记录：BeginPluginTrace（新表）
+			var pluginTraceID string
+			if d.triggerRecorder != nil {
+				selfID := transport.GetSelfID(ctx)
+				groupIDInt := parseIntOrZero(groupID)
+				userIDInt := parseIntOrZero(userID)
+				messageIDInt := parseIntOrZero(messageSeq)
+
+				// 构建 triggerData
+				triggerData := map[string]interface{}{
+					"pattern":     c.Pattern,
+					"match_full":  m[0],
+					"raw_message": rawMsg,
+					"content":     content,
+				}
+				if len(m) > 1 {
+					triggerData["match_groups"] = m[1:]
+				}
+
+				pluginTraceID = d.triggerRecorder.BeginPluginTrace(
+					ctx,
+					pid,          // pluginID
+					c.ID,         // listenerID
+					"command",    // listenerType
+					groupIDInt,   // groupID
+					userIDInt,    // userID
+					selfID,       // selfID
+					messageIDInt, // messageID
+					messageSeq,   // messageSeq
+					triggerData,  // triggerData
+				)
+			}
+
 			// 设置 TraceID（如果插件支持）
 			if setter, ok := p.(TraceIDSetter); ok {
 				setter.SetTraceID(traceID)
@@ -341,11 +494,35 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			// 注入 content 字段到 raw（复用已计算的 content）
 			rawWithContent := injectContentFieldWithValue(raw, content)
 
-			if _, err := p.Handle(ctx, c.ID, rawWithContent, cm); err != nil {
+			_, handleErr := p.Handle(ctx, c.ID, rawWithContent, cm)
+
+			// 触发记录：EndTrace（旧表）
+			if d.triggerRecorder != nil && recorderTraceID != "" {
+				success := handleErr == nil
+				errorMsg := ""
+				if handleErr != nil {
+					errorMsg = handleErr.Error()
+				}
+				// HandleResult 是结构体，不需要序列化
+				responseStr := ""
+				d.triggerRecorder.EndTrace(ctx, recorderTraceID, responseStr, success, errorMsg)
+			}
+
+			// 插件触发记录：EndPluginTrace（新表）
+			if d.triggerRecorder != nil && pluginTraceID != "" {
+				success := handleErr == nil
+				errorMsg := ""
+				if handleErr != nil {
+					errorMsg = handleErr.Error()
+				}
+				d.triggerRecorder.EndPluginTrace(ctx, pluginTraceID, success, errorMsg)
+			}
+
+			if handleErr != nil {
 				d.logger.Error("[dispatch] plugin Handle error",
 					"plugin_id", pid,
 					"command_id", c.ID,
-					"error", err,
+					"error", handleErr,
 				)
 			}
 		}

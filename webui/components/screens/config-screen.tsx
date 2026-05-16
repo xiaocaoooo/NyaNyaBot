@@ -1,6 +1,6 @@
 "use client";
 
-import { Divider, Spinner } from "@heroui/react";
+import { Divider, Spinner, Switch } from "@heroui/react";
 import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -35,10 +35,18 @@ export function ConfigScreen() {
   const [messagePrefix, setMessagePrefix] = useState("");
   const [globalsRows, setGlobalsRows] = useState<GlobalRow[]>([createRow()]);
 
+  // Trigger log config states
+  const [triggerLogEnabled, setTriggerLogEnabled] = useState(false);
+  const [triggerLogDatabaseURI, setTriggerLogDatabaseURI] = useState("");
+  const [triggerLogQueueSize, setTriggerLogQueueSize] = useState("1000");
+  const [triggerLogBatchSize, setTriggerLogBatchSize] = useState("100");
+  const [triggerLogBatchInterval, setTriggerLogBatchInterval] = useState("5s");
+
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingGlobals, setSavingGlobals] = useState(false);
   const [savingPrefix, setSavingPrefix] = useState(false);
+  const [savingTriggerLog, setSavingTriggerLog] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -53,6 +61,13 @@ export function ConfigScreen() {
       setReverseWSAddr(configRes.onebot.reverse_ws.listen_addr ?? "");
       setChatLogDatabaseURI(configRes.chat_log?.database_uri ?? "");
       setMessagePrefix(configRes.message_prefix ?? "");
+
+      // Load trigger log config
+      setTriggerLogEnabled(configRes.trigger_log?.enabled ?? false);
+      setTriggerLogDatabaseURI(configRes.trigger_log?.database_uri ?? "");
+      setTriggerLogQueueSize(String(configRes.trigger_log?.queue_size ?? 1000));
+      setTriggerLogBatchSize(String(configRes.trigger_log?.batch_size ?? 100));
+      setTriggerLogBatchInterval(configRes.trigger_log?.batch_interval ?? "5s");
 
       const rows = Object.entries(globalsRes.globals ?? {}).map(([key, value]) => ({
         id: Math.random().toString(36).slice(2),
@@ -154,6 +169,42 @@ export function ConfigScreen() {
       setError(err instanceof Error ? err.message : t("config.errorSavePrefix"));
     } finally {
       setSavingPrefix(false);
+    }
+  };
+
+  const saveTriggerLog = async () => {
+    setSavingTriggerLog(true);
+    setStatus(null);
+    setError(null);
+
+    try {
+      const queueSize = parseInt(triggerLogQueueSize, 10);
+      const batchSize = parseInt(triggerLogBatchSize, 10);
+
+      if (isNaN(queueSize) || queueSize <= 0) {
+        setError(t("config.errorTriggerLogQueueSize"));
+        return;
+      }
+
+      if (isNaN(batchSize) || batchSize <= 0) {
+        setError(t("config.errorTriggerLogBatchSize"));
+        return;
+      }
+
+      await apiClient.updateConfig({
+        trigger_log: {
+          enabled: triggerLogEnabled,
+          database_uri: triggerLogDatabaseURI.trim(),
+          queue_size: queueSize,
+          batch_size: batchSize,
+          batch_interval: triggerLogBatchInterval.trim(),
+        },
+      });
+      setStatus(t("config.statusSaveTriggerLog"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("config.errorSaveTriggerLog"));
+    } finally {
+      setSavingTriggerLog(false);
     }
   };
 
@@ -271,6 +322,91 @@ export function ConfigScreen() {
               onPress={savePrefix}
             >
               {t("config.saveBasic")}
+            </AppButton>
+          </AppCardFooter>
+        </AppCard>
+
+        <AppCard className="lg:col-span-12">
+          <AppCardHeader>
+            <h2 className="text-lg font-semibold text-text">{t("config.triggerLogTitle")}</h2>
+            <p className="text-sm text-muted">{t("config.triggerLogDesc")}</p>
+          </AppCardHeader>
+          <AppCardBody>
+            <div className="space-y-4">
+              <FormField
+                description={t("config.triggerLogEnabledDesc")}
+                label={t("config.triggerLogEnabledLabel")}
+              >
+                <Switch
+                  isSelected={triggerLogEnabled}
+                  onValueChange={setTriggerLogEnabled}
+                  aria-label={t("config.triggerLogEnabledAria")}
+                >
+                  {triggerLogEnabled ? t("config.enabled") : t("config.disabled")}
+                </Switch>
+              </FormField>
+
+              <FormField
+                description={t("config.triggerLogDatabaseDesc")}
+                label={t("config.triggerLogDatabaseLabel")}
+              >
+                <AppInput
+                  aria-label={t("config.triggerLogDatabaseAria")}
+                  placeholder="postgres://user:pass@localhost:5432/nyanyabot?sslmode=disable"
+                  value={triggerLogDatabaseURI}
+                  onValueChange={setTriggerLogDatabaseURI}
+                />
+              </FormField>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <FormField
+                  description={t("config.triggerLogQueueSizeDesc")}
+                  label={t("config.triggerLogQueueSizeLabel")}
+                >
+                  <AppInput
+                    aria-label={t("config.triggerLogQueueSizeAria")}
+                    placeholder="1000"
+                    type="number"
+                    value={triggerLogQueueSize}
+                    onValueChange={setTriggerLogQueueSize}
+                  />
+                </FormField>
+
+                <FormField
+                  description={t("config.triggerLogBatchSizeDesc")}
+                  label={t("config.triggerLogBatchSizeLabel")}
+                >
+                  <AppInput
+                    aria-label={t("config.triggerLogBatchSizeAria")}
+                    placeholder="100"
+                    type="number"
+                    value={triggerLogBatchSize}
+                    onValueChange={setTriggerLogBatchSize}
+                  />
+                </FormField>
+
+                <FormField
+                  description={t("config.triggerLogBatchIntervalDesc")}
+                  label={t("config.triggerLogBatchIntervalLabel")}
+                >
+                  <AppInput
+                    aria-label={t("config.triggerLogBatchIntervalAria")}
+                    placeholder="5s"
+                    value={triggerLogBatchInterval}
+                    onValueChange={setTriggerLogBatchInterval}
+                  />
+                </FormField>
+              </div>
+            </div>
+          </AppCardBody>
+          <AppCardFooter>
+            <AppButton
+              color="primary"
+              isLoading={savingTriggerLog}
+              startContent={<Save className="h-4 w-4" />}
+              onPress={saveTriggerLog}
+            >
+              {t("config.saveTriggerLog")}
             </AppButton>
           </AppCardFooter>
         </AppCard>

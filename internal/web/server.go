@@ -12,12 +12,14 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/reversews"
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
+	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
 )
 
 type pluginConfigPatch struct {
@@ -44,13 +46,15 @@ type pluginListItem struct {
 }
 
 type Server struct {
-	store                 *config.Store
-	pm                    *plugin.Manager
-	statsProvider         StatsProvider
-	reverseWSServer       *reversews.Server
-	frontend              fs.FS
-	sessions              *sessionManager
-	onChatLogConfigChange func(context.Context, config.ChatLogConfig)
+	store                    *config.Store
+	pm                       *plugin.Manager
+	statsProvider            StatsProvider
+	reverseWSServer          *reversews.Server
+	triggerRecorder          *triggerlog.Recorder
+	frontend                 fs.FS
+	sessions                 *sessionManager
+	onChatLogConfigChange    func(context.Context, config.ChatLogConfig)
+	onTriggerLogConfigChange func(context.Context, config.TriggerLogConfig)
 }
 
 // StatsProvider 提供统计信息的接口
@@ -74,6 +78,14 @@ func (s *Server) SetChatLogConfigChangeHandler(fn func(context.Context, config.C
 	s.onChatLogConfigChange = fn
 }
 
+func (s *Server) SetTriggerLogConfigChangeHandler(fn func(context.Context, config.TriggerLogConfig)) {
+	s.onTriggerLogConfigChange = fn
+}
+
+func (s *Server) SetTriggerRecorder(recorder *triggerlog.Recorder) {
+	s.triggerRecorder = recorder
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -86,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/bots", s.handleBots)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
 	mux.HandleFunc("/api/plugins/", s.handlePluginSubAPI)
+	mux.HandleFunc("/api/trigger-logs", s.handleTriggerLogs)
+	mux.HandleFunc("/api/trigger-logs/stats", s.handleTriggerLogsStats)
 
 	// Serve exported Next.js static UI for all non-API routes.
 	mux.HandleFunc("/", s.handleFrontend)
@@ -640,6 +654,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			ChatLog       *struct {
 				DatabaseURI *string `json:"database_uri"`
 			} `json:"chat_log"`
+		TriggerLog *struct {
+			Enabled       *bool   `json:"enabled"`
+			DatabaseURI   *string `json:"database_uri"`
+			QueueSize     *int    `json:"queue_size"`
+			BatchSize     *int    `json:"batch_size"`
+			BatchInterval *string `json:"batch_interval"`
+		} `json:"trigger_log"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -664,6 +685,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil {
 				c.ChatLog.DatabaseURI = strings.TrimSpace(*patch.ChatLog.DatabaseURI)
 			}
+		if patch.TriggerLog != nil {
+			if patch.TriggerLog.Enabled != nil {
+				c.TriggerLog.Enabled = *patch.TriggerLog.Enabled
+			}
+			if patch.TriggerLog.DatabaseURI != nil {
+				c.TriggerLog.DatabaseURI = strings.TrimSpace(*patch.TriggerLog.DatabaseURI)
+			}
+			if patch.TriggerLog.QueueSize != nil {
+				c.TriggerLog.QueueSize = *patch.TriggerLog.QueueSize
+			}
+			if patch.TriggerLog.BatchSize != nil {
+				c.TriggerLog.BatchSize = *patch.TriggerLog.BatchSize
+			}
+			if patch.TriggerLog.BatchInterval != nil {
+				c.TriggerLog.BatchInterval = strings.TrimSpace(*patch.TriggerLog.BatchInterval)
+			}
+		}
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -672,6 +710,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil && s.onChatLogConfigChange != nil {
 			s.onChatLogConfigChange(r.Context(), cfg.ChatLog)
 		}
+	if patch.TriggerLog != nil && s.onTriggerLogConfigChange != nil {
+		// 只要 TriggerLog 有任何变化就触发回调
+		if patch.TriggerLog.Enabled != nil || patch.TriggerLog.DatabaseURI != nil ||
+			patch.TriggerLog.QueueSize != nil || patch.TriggerLog.BatchSize != nil ||
+			patch.TriggerLog.BatchInterval != nil {
+			s.onTriggerLogConfigChange(r.Context(), cfg.TriggerLog)
+		}
+	}
 		writeJSON(w, http.StatusOK, cfg)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -686,4 +732,272 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := enc.Encode(v); err != nil {
 		fmt.Printf("ERROR: JSON encode failed: %v\n", err)
 	}
+}
+
+// TriggerLogDTO 触发记录 DTO
+type TriggerLogDTO struct {
+	TraceID      string                 `json:"trace_id"`
+	PluginID     string                 `json:"plugin_id"`
+	ListenerID   string                 `json:"listener_id"`
+	ListenerType string                 `json:"listener_type"`
+	GroupID      int64                  `json:"group_id"`
+	UserID       int64                  `json:"user_id"`
+	SelfID       int64                  `json:"self_id"`
+	MessageID    int64                  `json:"message_id"`
+	MessageSeq   string                 `json:"message_seq"`
+	TriggerData  map[string]interface{} `json:"trigger_data"`
+	Success      bool                   `json:"success"`
+	DurationMs   int                    `json:"duration_ms"`
+	ErrorMessage string                 `json:"error_message"`
+	TriggeredAt  string                 `json:"triggered_at"`
+	RecordedAt   string                 `json:"recorded_at"`
+}
+
+// TriggerLogsResponse 触发记录查询响应
+type TriggerLogsResponse struct {
+	Records  []TriggerLogDTO                       `json:"records"`
+	Total    int                                   `json:"total"`
+	Page     int                                   `json:"page"`
+	PageSize int                                   `json:"page_size"`
+	Stats    triggerlog.PluginTriggerLogStatistics `json:"stats"`
+}
+
+func (s *Server) handleTriggerLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.triggerRecorder == nil {
+		writeJSON(w, http.StatusOK, TriggerLogsResponse{
+			Records:  []TriggerLogDTO{},
+			Total:    0,
+			Page:     1,
+			PageSize: 20,
+			Stats: triggerlog.PluginTriggerLogStatistics{
+				TotalCount:    0,
+				SuccessCount:  0,
+				FailedCount:   0,
+				AvgDurationMs: 0,
+			},
+		})
+		return
+	}
+
+	// 解析查询参数
+	query := r.URL.Query()
+	params := triggerlog.PluginTriggerLogQueryParams{}
+
+	// 解析 group_id
+	if groupIDStr := query.Get("group_id"); groupIDStr != "" {
+		var groupID int64
+		if _, err := fmt.Sscanf(groupIDStr, "%d", &groupID); err == nil {
+			params.GroupID = &groupID
+		}
+	}
+
+	// 解析 user_id
+	if userIDStr := query.Get("user_id"); userIDStr != "" {
+		var userID int64
+		if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err == nil {
+			params.UserID = &userID
+		}
+	}
+
+	// 解析 plugin_id
+	if pluginID := query.Get("plugin_id"); pluginID != "" {
+		params.PluginID = &pluginID
+	}
+
+	// 解析 listener_id
+	if listenerID := query.Get("listener_id"); listenerID != "" {
+		params.ListenerID = &listenerID
+	}
+
+	// 解析 listener_type
+	if listenerType := query.Get("listener_type"); listenerType != "" {
+		params.ListenerType = &listenerType
+	}
+
+	// 解析 trace_id
+	if traceID := query.Get("trace_id"); traceID != "" {
+		params.TraceID = &traceID
+	}
+
+	// 解析 message_seq
+	if messageSeq := query.Get("message_seq"); messageSeq != "" {
+		params.MessageSeq = &messageSeq
+	}
+
+	// 解析 success
+	if successStr := query.Get("success"); successStr != "" {
+		if successStr == "true" {
+			success := true
+			params.Success = &success
+		} else if successStr == "false" {
+			success := false
+			params.Success = &success
+		}
+	}
+
+	// 解析时间范围
+	if startTimeStr := query.Get("start_time"); startTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			params.StartTime = &startTime
+		}
+	}
+
+	if endTimeStr := query.Get("end_time"); endTimeStr != "" {
+		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+			params.EndTime = &endTime
+		}
+	}
+
+	// 解析排序
+	if sortBy := query.Get("sort_by"); sortBy != "" {
+		params.OrderBy = sortBy
+	}
+	params.OrderDesc = query.Get("sort_desc") == "true"
+
+	// 解析分页参数
+	page := 1
+	if pageStr := query.Get("page"); pageStr != "" {
+		if p, err := fmt.Sscanf(pageStr, "%d", &page); err == nil && p > 0 {
+			if page < 1 {
+				page = 1
+			}
+		}
+	}
+
+	pageSize := 20
+	if pageSizeStr := query.Get("page_size"); pageSizeStr != "" {
+		if ps, err := fmt.Sscanf(pageSizeStr, "%d", &pageSize); err == nil && ps > 0 {
+			if pageSize < 1 {
+				pageSize = 1
+			} else if pageSize > 100 {
+				pageSize = 100
+			}
+		}
+	}
+
+	params.Limit = pageSize
+	params.Offset = (page - 1) * pageSize
+
+	// 查询日志
+	logs, err := s.triggerRecorder.QueryPluginTriggerLogs(r.Context(), params)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	// 获取统计信息
+	stats, err := s.triggerRecorder.GetPluginTriggerLogStatistics(r.Context(), params)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	// 转换为 DTO
+	dtos := make([]TriggerLogDTO, 0, len(logs))
+	for _, log := range logs {
+		dtos = append(dtos, TriggerLogDTO{
+			TraceID:      log.TraceID,
+			PluginID:     log.PluginID,
+			ListenerID:   log.ListenerID,
+			ListenerType: log.ListenerType,
+			GroupID:      log.GroupID,
+			UserID:       log.UserID,
+			SelfID:       log.SelfID,
+			MessageID:    log.MessageID,
+			MessageSeq:   log.MessageSeq,
+			TriggerData:  log.TriggerData,
+			Success:      log.Success,
+			DurationMs:   log.DurationMs,
+			ErrorMessage: log.ErrorMessage,
+			TriggeredAt:  log.TriggeredAt.Format(time.RFC3339),
+			RecordedAt:   log.RecordedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, TriggerLogsResponse{
+		Records:  dtos,
+		Total:    int(stats.TotalCount),
+		Page:     page,
+		PageSize: pageSize,
+		Stats:    *stats,
+	})
+}
+
+func (s *Server) handleTriggerLogsStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.triggerRecorder == nil {
+		writeJSON(w, http.StatusOK, triggerlog.PluginTriggerLogStatistics{
+			TotalCount:    0,
+			SuccessCount:  0,
+			FailedCount:   0,
+			AvgDurationMs: 0,
+		})
+		return
+	}
+
+	// 解析查询参数（用于过滤统计）
+	query := r.URL.Query()
+	params := triggerlog.PluginTriggerLogQueryParams{}
+
+	// 解析 group_id
+	if groupIDStr := query.Get("group_id"); groupIDStr != "" {
+		var groupID int64
+		if _, err := fmt.Sscanf(groupIDStr, "%d", &groupID); err == nil {
+			params.GroupID = &groupID
+		}
+	}
+
+	// 解析 user_id
+	if userIDStr := query.Get("user_id"); userIDStr != "" {
+		var userID int64
+		if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err == nil {
+			params.UserID = &userID
+		}
+	}
+
+	// 解析 plugin_id
+	if pluginID := query.Get("plugin_id"); pluginID != "" {
+		params.PluginID = &pluginID
+	}
+
+	// 解析 listener_id
+	if listenerID := query.Get("listener_id"); listenerID != "" {
+		params.ListenerID = &listenerID
+	}
+
+	// 解析 listener_type
+	if listenerType := query.Get("listener_type"); listenerType != "" {
+		params.ListenerType = &listenerType
+	}
+
+	// 解析时间范围
+	if startTimeStr := query.Get("start_time"); startTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			params.StartTime = &startTime
+		}
+	}
+
+	if endTimeStr := query.Get("end_time"); endTimeStr != "" {
+		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+			params.EndTime = &endTime
+		}
+	}
+
+	// 获取统计信息
+	stats, err := s.triggerRecorder.GetPluginTriggerLogStatistics(r.Context(), params)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, stats)
 }

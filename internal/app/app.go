@@ -18,6 +18,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
 	"github.com/xiaocaoooo/nyanyabot/internal/pluginhost"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
+	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
 	"github.com/xiaocaoooo/nyanyabot/internal/util"
 	"github.com/xiaocaoooo/nyanyabot/internal/web"
 )
@@ -54,6 +55,7 @@ type App struct {
 	Web            *http.Server
 	Stats          *stats.Stats
 	ChatLog        *chatlog.Recorder
+	TriggerLog     *triggerlog.Recorder
 	Deduper        *dedup.MemoryDeduper
 	dedupCleanStop chan struct{}
 }
@@ -78,7 +80,27 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	pm.SetPluginEnabledChecker(func(pluginID string) bool {
 		return store.Get().IsPluginEnabled(pluginID)
 	})
-	disp := dispatch.NewWithLoggerAndStats(pm, logger, st)
+
+	// Create triggerlog recorder (before dispatcher so it can be passed)
+	triggerRecorder := triggerlog.NewRecorder(logger)
+
+	// Connect to database if enabled and configured
+	if cfg.TriggerLog.Enabled && cfg.TriggerLog.DatabaseURI != "" {
+		if err := triggerRecorder.Reconnect(ctx, cfg.TriggerLog.DatabaseURI); err != nil {
+			logger.Warn("triggerlog initial connect failed", "err", err)
+		}
+	}
+
+	// Start triggerlog recorder if enabled
+	if cfg.TriggerLog.Enabled {
+		triggerRecorder.Start(ctx)
+		logger.Info("triggerlog recorder started", "enabled", true)
+	} else {
+		logger.Info("triggerlog recorder created but not started", "enabled", false)
+	}
+
+	// Create dispatcher with trigger recorder
+	disp := dispatch.NewDispatcher(pm, logger, st, triggerRecorder)
 	disp.SetConfigProvider(store.Get)
 
 	// Initialize deduper if enabled
@@ -117,8 +139,8 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		}()
 	}
 
-	// Create cron scheduler
-	cronScheduler := cron.NewScheduler(pm, logger)
+	// Create cron scheduler with triggerRecorder
+	cronScheduler := cron.NewScheduler(pm, logger, triggerRecorder)
 	cronScheduler.SetConfigProvider(store.Get)
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
@@ -210,6 +232,9 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		}, nil
 	})
 
+	// 设置 triggerRecorder 到 PluginHost
+	ph.SetTriggerRecorder(triggerRecorder)
+
 	// 连接追踪系统
 	disp.SetTraceProvider(ph)
 	cronScheduler.SetTraceProvider(ph)
@@ -217,9 +242,29 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	webSrv := web.New(store, pm)
 	webSrv.SetStatsProvider(st)
 	webSrv.SetReverseWSServer(ob)
+	webSrv.SetTriggerRecorder(triggerRecorder)
 	webSrv.SetChatLogConfigChangeHandler(func(ctx context.Context, chatLogCfg config.ChatLogConfig) {
 		if err := chatRecorder.Reconnect(ctx, chatLogCfg.DatabaseURI); err != nil {
 			logger.Error("chatlog runtime reconnect failed", "err", err)
+		}
+	})
+	webSrv.SetTriggerLogConfigChangeHandler(func(ctx context.Context, triggerLogCfg config.TriggerLogConfig) {
+		// 处理数据库连接变化
+		if triggerLogCfg.DatabaseURI != "" {
+			if err := triggerRecorder.Reconnect(ctx, triggerLogCfg.DatabaseURI); err != nil {
+				logger.Error("triggerlog runtime reconnect failed", "err", err)
+			}
+		}
+
+		// 处理启用/禁用状态变化
+		if triggerLogCfg.Enabled {
+			triggerRecorder.Start(ctx)
+			logger.Info("triggerlog recorder started via config update")
+		} else {
+			if err := triggerRecorder.Stop(ctx); err != nil {
+				logger.Error("triggerlog recorder stop failed", "err", err)
+			}
+			logger.Info("triggerlog recorder stopped via config update")
 		}
 	})
 	httpSrv := &http.Server{
@@ -239,14 +284,24 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 		Web:            httpSrv,
 		Stats:          st,
 		ChatLog:        chatRecorder,
+		TriggerLog:     triggerRecorder,
 		Deduper:        memDeduper,
 		dedupCleanStop: dedupCleanStop,
 	}, nil
 }
 
-// Shutdown stops the deduper cleanup goroutine
+// Shutdown stops the deduper cleanup goroutine and closes recorders
 func (a *App) Shutdown() {
 	if a.dedupCleanStop != nil {
 		close(a.dedupCleanStop)
+	}
+	
+	// Close triggerlog recorder
+	if a.TriggerLog != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.TriggerLog.Stop(ctx); err != nil {
+			a.Logger.Error("failed to stop triggerlog recorder", "err", err)
+		}
 	}
 }

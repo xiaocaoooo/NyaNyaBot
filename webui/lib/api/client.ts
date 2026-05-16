@@ -16,6 +16,9 @@ import type {
   PluginDescriptor,
   PluginListItem,
   PluginStateView,
+  TriggerLogQuery,
+  TriggerLogsResponse,
+  TriggerStatistics,
   UpdateGlobalsPayload,
   UpdatePluginConfigPayload,
   UpdatePluginSwitchesPayload,
@@ -220,5 +223,51 @@ export const apiClient = {
       ...response,
       bots: (response.bots ?? []).map(normalizeBotInfo),
     }));
+  },
+  queryTriggerLogs(query?: TriggerLogQuery) {
+    const params = new URLSearchParams();
+    
+    if (query) {
+      if (query.group_id !== undefined) params.append("group_id", String(query.group_id));
+      if (query.user_id !== undefined) params.append("user_id", String(query.user_id));
+      if (query.plugin_id) params.append("plugin_id", query.plugin_id);
+      if (query.listener_id) params.append("listener_id", query.listener_id);
+      if (query.listener_type) params.append("listener_type", query.listener_type);
+      if (query.start_time) params.append("start_time", query.start_time);
+      if (query.end_time) params.append("end_time", query.end_time);
+      if (query.message_seq) params.append("message_seq", query.message_seq);
+      if (query.trace_id) params.append("trace_id", query.trace_id);
+      if (query.success !== undefined) params.append("success", String(query.success));
+      if (query.sort_by) params.append("sort_by", query.sort_by);
+      if (query.sort_desc !== undefined) params.append("sort_desc", String(query.sort_desc));
+      if (query.page !== undefined) params.append("page", String(query.page));
+      if (query.page_size !== undefined) params.append("page_size", String(query.page_size));
+    }
+    
+    const queryString = params.toString();
+    const url = queryString ? `/api/trigger-logs?${queryString}` : "/api/trigger-logs";
+    
+    return requestJSON<TriggerLogsResponse>(url);
+  },
+  getTriggerLogStats(query?: Omit<TriggerLogQuery, 'page' | 'page_size' | 'sort_by' | 'sort_desc'>) {
+    const params = new URLSearchParams();
+    
+    if (query) {
+      if (query.group_id !== undefined) params.append("group_id", String(query.group_id));
+      if (query.user_id !== undefined) params.append("user_id", String(query.user_id));
+      if (query.plugin_id) params.append("plugin_id", query.plugin_id);
+      if (query.listener_id) params.append("listener_id", query.listener_id);
+      if (query.listener_type) params.append("listener_type", query.listener_type);
+      if (query.start_time) params.append("start_time", query.start_time);
+      if (query.end_time) params.append("end_time", query.end_time);
+      if (query.message_seq) params.append("message_seq", query.message_seq);
+      if (query.trace_id) params.append("trace_id", query.trace_id);
+      if (query.success !== undefined) params.append("success", String(query.success));
+    }
+    
+    const queryString = params.toString();
+    const url = queryString ? `/api/trigger-logs/stats?${queryString}` : "/api/trigger-logs/stats";
+    
+    return requestJSON<TriggerStatistics>(url);
   },
 };

@@ -33,6 +33,7 @@ type AppConfig struct {
 	// PluginControls stores host-side runtime switches for plugins and listeners.
 	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
 	ChatLog        ChatLogConfig            `json:"chat_log"`
+	TriggerLog     TriggerLogConfig         `json:"trigger_log"`
 	// MessageDedup enables message deduplication based on group_id + message_seq.
 	// Only applies to group messages. Defaults to true.
 	MessageDedup *bool       `json:"message_dedup,omitempty"`
@@ -71,6 +72,15 @@ type ChatLogConfig struct {
 	Queue       *ChatLogQueueConfig `json:"queue,omitempty"`
 }
 
+// TriggerLogConfig stores configuration for trigger logging.
+type TriggerLogConfig struct {
+	Enabled       bool   `json:"enabled"`
+	DatabaseURI   string `json:"database_uri"`
+	QueueSize     int    `json:"queue_size"`
+	BatchSize     int    `json:"batch_size"`
+	BatchInterval string `json:"batch_interval"`
+}
+
 type DedupConfig struct {
 	Enabled    bool   `json:"enabled"`
 	Backend    string `json:"backend"`
@@ -84,17 +94,24 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-		WebUI:          WebUIConfig{ListenAddr: "0.0.0.0:3000"},
-		MessagePrefix:  defaultMessagePrefix,
-		Globals:        make(map[string]string),
-		Plugins:        make(map[string]json.RawMessage),
-		PluginControls: make(map[string]PluginControl),
-		ChatLog:        ChatLogConfig{DatabaseURI: ""},
-		Dedup: DedupConfig{
-			Enabled:    true,
-			Backend:    "memory",
-			TTLSeconds: 3600,
-		},
+	WebUI:          WebUIConfig{ListenAddr: "0.0.0.0:3000"},
+	MessagePrefix:  defaultMessagePrefix,
+	Globals:        make(map[string]string),
+	Plugins:        make(map[string]json.RawMessage),
+	PluginControls: make(map[string]PluginControl),
+	ChatLog:        ChatLogConfig{DatabaseURI: ""},
+	TriggerLog: TriggerLogConfig{
+		Enabled:       false,
+		DatabaseURI:   "",
+		QueueSize:     1000,
+		BatchSize:     100,
+		BatchInterval: "5s",
+	},
+	Dedup: DedupConfig{
+		Enabled:    true,
+		Backend:    "memory",
+		TTLSeconds: 3600,
+	},
 	}
 }
 
@@ -248,6 +265,19 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 	// Validate Dedup backend.
 	if cfg.Dedup.Backend != "memory" && cfg.Dedup.Backend != "redis" {
 		return false, errors.New("dedup backend must be 'memory' or 'redis'")
+	}
+	// Ensure TriggerLog config has valid defaults.
+	if cfg.TriggerLog.QueueSize <= 0 {
+		cfg.TriggerLog.QueueSize = 1000
+		changed = true
+	}
+	if cfg.TriggerLog.BatchSize <= 0 {
+		cfg.TriggerLog.BatchSize = 100
+		changed = true
+	}
+	if cfg.TriggerLog.BatchInterval == "" {
+		cfg.TriggerLog.BatchInterval = "5s"
+		changed = true
 	}
 	return changed, nil
 }

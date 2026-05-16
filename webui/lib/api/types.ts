@@ -10,6 +10,13 @@ export interface AppConfig {
   chat_log: {
     database_uri: string;
   };
+  trigger_log: {
+    enabled: boolean;
+    database_uri: string;
+    queue_size: number;
+    batch_size: number;
+    batch_interval: string;
+  };
   globals?: Record<string, string>;
   plugins?: Record<string, unknown>;
   message_prefix?: string;
@@ -26,6 +33,13 @@ export interface ConfigPatch {
   };
   chat_log?: {
     database_uri?: string;
+  };
+  trigger_log?: {
+    enabled?: boolean;
+    database_uri?: string;
+    queue_size?: number;
+    batch_size?: number;
+    batch_interval?: string;
   };
   message_prefix?: string;
 }
@@ -182,4 +196,54 @@ export interface BotsResponse {
   global_sent_count?: number;
   global_start_time?: string;
   global_uptime?: number;
+}
+
+export interface TriggerLog {
+  trace_id: string;
+  plugin_id: string;
+  listener_id: string;
+  listener_type: 'command' | 'event' | 'cron';
+  group_id: number;
+  user_id: number;
+  self_id: number;
+  message_id: number;
+  message_seq: string;
+  trigger_data: Record<string, unknown>;
+  success: boolean;
+  duration_ms: number;
+  error_message: string;
+  triggered_at: string; // ISO 8601
+  recorded_at: string;  // ISO 8601
+}
+
+export interface TriggerLogQuery {
+  group_id?: number;
+  user_id?: number;
+  plugin_id?: string;
+  listener_id?: string;
+  listener_type?: 'command' | 'event' | 'cron';
+  start_time?: string;
+  end_time?: string;
+  message_seq?: string;
+  trace_id?: string;
+  success?: boolean;
+  sort_by?: 'triggered_at' | 'duration_ms';
+  sort_desc?: boolean;
+  page?: number;
+  page_size?: number;
+}
+
+export interface TriggerStatistics {
+  total_count: number;
+  success_count: number;
+  failed_count: number;
+  avg_duration_ms: number;
+}
+
+export interface TriggerLogsResponse {
+  records: TriggerLog[];
+  total: number;
+  page: number;
+  page_size: number;
+  stats: TriggerStatistics;
 }
