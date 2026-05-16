@@ -386,8 +386,8 @@ func TestDispatchDeduplicatesMessages(t *testing.T) {
 	// 设置 deduper
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
-	// 发送相同的消息两次（相同 group_id 和 message_seq）
-	msg := `{"post_type":"message","message_type":"group","group_id":"123456","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	// 发送相同的消息两次（相同 group_id 和 real_seq）
+	msg := `{"post_type":"message","message_type":"group","group_id":"123456","real_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
 	disp.Dispatch(context.Background(), messageEvent(msg))
 	disp.Dispatch(context.Background(), messageEvent(msg))
 
@@ -413,9 +413,9 @@ func TestDispatchDedupDifferentGroups(t *testing.T) {
 	// 设置 deduper
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
-	// 发送相同 message_seq 但不同 group_id 的消息
-	msg1 := `{"post_type":"message","message_type":"group","group_id":"111","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
-	msg2 := `{"post_type":"message","message_type":"group","group_id":"222","message_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	// 发送相同 real_seq 但不同 group_id 的消息
+	msg1 := `{"post_type":"message","message_type":"group","group_id":"111","real_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	msg2 := `{"post_type":"message","message_type":"group","group_id":"222","real_seq":"100","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
 	disp.Dispatch(context.Background(), messageEvent(msg1))
 	disp.Dispatch(context.Background(), messageEvent(msg2))
 
@@ -438,8 +438,8 @@ func TestDispatchDedupDisabled(t *testing.T) {
 	// 设置 deduper（即使设置了，也应该因为配置禁用而不使用）
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
-	// 发送相同的消息两次（使用不同的 message_seq 避免与其他测试冲突）
-	msg := `{"post_type":"message","message_type":"group","group_id":"999","message_seq":"999","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
+	// 发送相同的消息两次（使用不同的 real_seq 避免与其他测试冲突）
+	msg := `{"post_type":"message","message_type":"group","group_id":"999","real_seq":"999","user_id":"789","self_id":"456","raw_message":"/test","message":"/test"}`
 	disp.Dispatch(context.Background(), messageEvent(msg))
 	disp.Dispatch(context.Background(), messageEvent(msg))
 
@@ -462,7 +462,7 @@ func TestDispatchDedupNonGroupMessage(t *testing.T) {
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
 	// 发送相同的私聊消息两次（message_type 不是 group）
-	msg := `{"post_type":"message","message_type":"private","user_id":"789","self_id":"456","message_seq":"100","raw_message":"hello","message":"hello"}`
+	msg := `{"post_type":"message","message_type":"private","user_id":"789","self_id":"456","real_seq":"100","raw_message":"hello","message":"hello"}`
 	disp.Dispatch(context.Background(), messageEvent(msg))
 	disp.Dispatch(context.Background(), messageEvent(msg))
 

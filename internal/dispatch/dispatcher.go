@@ -114,7 +114,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	// 提取消息元数据（用于追踪）
 	groupID := getString(raw, "group_id")
 	userID := getString(raw, "user_id")
-	messageSeq := getString(raw, "message_seq")
+	messageSeq := getString(raw, "real_seq")
 	rawMsg := getString(raw, "raw_message")
 
 	// 去重检查（仅对群消息生效）
