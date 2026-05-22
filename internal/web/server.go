@@ -687,8 +687,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				} `json:"reverse_ws"`
 			} `json:"onebot"`
 			WebUI *struct {
-				ListenAddr *string `json:"listen_addr"`
-				Password   *string `json:"password"`
+				ListenAddr      *string `json:"listen_addr"`
+				Password        *string `json:"password"`
+				AutoRefresh     *bool   `json:"auto_refresh"`
+				RefreshInterval *int    `json:"refresh_interval"`
 			} `json:"webui"`
 			MessagePrefix *string `json:"message_prefix"`
 			GlobalSleepTimeout *int `json:"global_sleep_timeout"`
@@ -714,11 +716,19 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			if patch.OneBot != nil && patch.OneBot.ReverseWS != nil && patch.OneBot.ReverseWS.ListenAddr != nil {
 				c.OneBot.ReverseWS.ListenAddr = strings.TrimSpace(*patch.OneBot.ReverseWS.ListenAddr)
 			}
-			if patch.WebUI != nil && patch.WebUI.ListenAddr != nil {
-				c.WebUI.ListenAddr = strings.TrimSpace(*patch.WebUI.ListenAddr)
-			}
-			if patch.WebUI != nil && patch.WebUI.Password != nil {
-				c.WebUI.Password = strings.TrimSpace(*patch.WebUI.Password)
+			if patch.WebUI != nil {
+				if patch.WebUI.ListenAddr != nil {
+					c.WebUI.ListenAddr = strings.TrimSpace(*patch.WebUI.ListenAddr)
+				}
+				if patch.WebUI.Password != nil {
+					c.WebUI.Password = strings.TrimSpace(*patch.WebUI.Password)
+				}
+				if patch.WebUI.AutoRefresh != nil {
+					c.WebUI.AutoRefresh = patch.WebUI.AutoRefresh
+				}
+				if patch.WebUI.RefreshInterval != nil {
+					c.WebUI.RefreshInterval = *patch.WebUI.RefreshInterval
+				}
 			}
 			if patch.MessagePrefix != nil {
 				c.MessagePrefix = strings.TrimSpace(*patch.MessagePrefix)

@@ -65,8 +65,10 @@ type ReverseWSConfig struct {
 }
 
 type WebUIConfig struct {
-	ListenAddr string `json:"listen_addr"`
-	Password   string `json:"password"`
+	ListenAddr      string `json:"listen_addr"`
+	Password        string `json:"password"`
+	AutoRefresh     *bool  `json:"auto_refresh,omitempty"`
+	RefreshInterval int    `json:"refresh_interval"`
 }
 
 type ChatLogQueueConfig struct {
@@ -100,7 +102,11 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-	WebUI:          WebUIConfig{ListenAddr: "0.0.0.0:3000"},
+	WebUI: WebUIConfig{
+		ListenAddr:      "0.0.0.0:3000",
+		AutoRefresh:     &[]bool{true}[0],
+		RefreshInterval: 1,
+	},
 	MessagePrefix:  defaultMessagePrefix,
 	Globals:        make(map[string]string),
 	Plugins:        make(map[string]json.RawMessage),
@@ -227,6 +233,15 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 	}
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "0.0.0.0:3000"
+		changed = true
+	}
+	if cfg.WebUI.AutoRefresh == nil {
+		autoRefresh := true
+		cfg.WebUI.AutoRefresh = &autoRefresh
+		changed = true
+	}
+	if cfg.WebUI.RefreshInterval <= 0 {
+		cfg.WebUI.RefreshInterval = 1
 		changed = true
 	}
 	if cfg.WebUI.Password == "" {

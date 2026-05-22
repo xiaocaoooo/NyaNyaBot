@@ -9,6 +9,7 @@ import { AppButton } from "@/components/ui/button";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { AppCard, AppCardBody, AppCardHeader } from "@/components/ui/card";
 import { StatusMessage } from "@/components/ui/status-message";
+import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 import { apiClient } from "@/lib/api/client";
 import type { AppConfig, BotsResponse, PluginDescriptor, TriggerStatistics } from "@/lib/api/types";
 
@@ -30,8 +31,8 @@ export function DashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -48,9 +49,11 @@ export function DashboardScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t("dashboard.errorLoad"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [t]);
+
+  useAutoRefresh(useCallback(() => fetchData(true), [fetchData]));
 
   useEffect(() => {
     void fetchData();

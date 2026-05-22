@@ -9,6 +9,7 @@ import { useI18n } from "@/components/providers/i18n-provider";
 import { AppCard, AppCardBody, AppCardHeader } from "@/components/ui/card";
 import { AppInput } from "@/components/ui/input";
 import { StatusMessage } from "@/components/ui/status-message";
+import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 import { apiClient } from "@/lib/api/client";
 import type { TriggerLog, TriggerLogQuery, TriggerLogsResponse } from "@/lib/api/types";
 
@@ -145,8 +146,8 @@ export function TriggerLogsScreen() {
   const [sortBy, setSortBy] = useState<"triggered_at" | "duration_ms">("triggered_at");
   const [pageSize, setPageSize] = useState("20");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -171,9 +172,11 @@ export function TriggerLogsScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t("triggerLogs.errorLoad"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [query, groupId, userId, pluginId, listenerId, startTime, endTime, messageSeq, listenerType, t]);
+
+  useAutoRefresh(useCallback(() => fetchData(true), [fetchData]));
 
   useEffect(() => {
     void fetchData();

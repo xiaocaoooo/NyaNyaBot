@@ -30,6 +30,8 @@ function createRow(seed = ""): GlobalRow {
 export function ConfigScreen() {
   const { t } = useI18n();
   const [webuiAddr, setWebuiAddr] = useState("");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState("1");
   const [reverseWSAddr, setReverseWSAddr] = useState("");
   const [chatLogDatabaseURI, setChatLogDatabaseURI] = useState("");
   const [messagePrefix, setMessagePrefix] = useState("");
@@ -59,6 +61,8 @@ export function ConfigScreen() {
     try {
       const [configRes, globalsRes] = await Promise.all([apiClient.fetchConfig(), apiClient.fetchGlobals()]);
       setWebuiAddr(configRes.webui.listen_addr ?? "");
+      setAutoRefresh(configRes.webui.auto_refresh ?? true);
+      setRefreshInterval(String(configRes.webui.refresh_interval ?? 1));
       setReverseWSAddr(configRes.onebot.reverse_ws.listen_addr ?? "");
       setChatLogDatabaseURI(configRes.chat_log?.database_uri ?? "");
       setMessagePrefix(configRes.message_prefix ?? "");
@@ -128,6 +132,8 @@ export function ConfigScreen() {
         },
         webui: {
           listen_addr: webuiAddr.trim(),
+          auto_refresh: autoRefresh,
+          refresh_interval: Number.parseInt(refreshInterval, 10) || 1,
         },
         chat_log: {
           database_uri: chatLogDatabaseURI.trim(),
@@ -262,6 +268,34 @@ export function ConfigScreen() {
                 onValueChange={setWebuiAddr}
               />
             </FormField>
+
+            <FormField
+              description={t("config.webuiAutoRefreshDesc")}
+              label={t("config.webuiAutoRefreshLabel")}
+            >
+              <Switch
+                isSelected={autoRefresh}
+                onValueChange={setAutoRefresh}
+                aria-label={t("config.webuiAutoRefreshLabel")}
+              >
+                {autoRefresh ? t("config.enabled") : t("config.disabled")}
+              </Switch>
+            </FormField>
+
+            {autoRefresh && (
+              <FormField
+                description={t("config.webuiRefreshIntervalDesc")}
+                label={t("config.webuiRefreshIntervalLabel")}
+              >
+                <AppInput
+                  aria-label={t("config.webuiRefreshIntervalLabel")}
+                  placeholder="1"
+                  type="number"
+                  value={refreshInterval}
+                  onValueChange={setRefreshInterval}
+                />
+              </FormField>
+            )}
 
             <FormField
               description={t("config.onebotDesc")}

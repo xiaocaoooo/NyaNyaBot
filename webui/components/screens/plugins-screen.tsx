@@ -10,6 +10,7 @@ import { AppCard, AppCardBody, AppCardFooter, AppCardHeader } from "@/components
 import { AppInput } from "@/components/ui/input";
 import { StatusMessage } from "@/components/ui/status-message";
 import { AppTextarea } from "@/components/ui/textarea";
+import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 import { apiClient } from "@/lib/api/client";
 import type { PluginListItem } from "@/lib/api/types";
 
@@ -488,8 +489,8 @@ export function PluginsScreen() {
     }
   }, [selectedPlugin]);
 
-  const loadPlugins = useCallback(async () => {
-    setLoading(true);
+  const loadPlugins = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     setSwitchError(null);
 
@@ -506,9 +507,11 @@ export function PluginsScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t("plugins.errorLoadList"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [t]);
+
+  useAutoRefresh(useCallback(() => loadPlugins(true), [loadPlugins]));
 
   useEffect(() => {
     void loadPlugins();

@@ -6,6 +6,8 @@ export interface AppConfig {
   };
   webui: {
     listen_addr: string;
+    auto_refresh: boolean;
+    refresh_interval: number;
   };
   chat_log: {
     database_uri: string;
@@ -31,6 +33,8 @@ export interface ConfigPatch {
   };
   webui?: {
     listen_addr?: string;
+    auto_refresh?: boolean;
+    refresh_interval?: number;
   };
   chat_log?: {
     database_uri?: string;
