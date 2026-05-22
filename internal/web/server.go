@@ -31,6 +31,8 @@ type pluginSwitchPatch struct {
 	Commands      map[string]bool `json:"commands,omitempty"`
 	Events        map[string]bool `json:"events,omitempty"`
 	CommandPrefix *string         `json:"prefix,omitempty"`
+	EnableSleep   *bool           `json:"enable_sleep,omitempty"`
+	SleepTimeout  *int            `json:"sleep_timeout,omitempty"`
 }
 
 type pluginStateView struct {
@@ -38,6 +40,9 @@ type pluginStateView struct {
 	Commands      map[string]bool `json:"commands"`
 	Events        map[string]bool `json:"events"`
 	CommandPrefix string          `json:"command_prefix"`
+	EnableSleep   bool            `json:"enable_sleep"`
+	SleepTimeout  int             `json:"sleep_timeout"`
+	Status        string          `json:"status"`
 }
 
 type pluginListItem struct {
@@ -126,14 +131,29 @@ func (s *Server) hotApplyAllPluginConfigs(ctx context.Context, cfg config.AppCon
 	}
 }
 
-func buildPluginState(cfg config.AppConfig, desc plugin.Descriptor) pluginStateView {
+func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppConfig, desc plugin.Descriptor) pluginStateView {
 	state := pluginStateView{
-		Enabled:  cfg.IsPluginEnabled(desc.PluginID),
-		Commands: make(map[string]bool, len(desc.Commands)),
-		Events:   make(map[string]bool, len(desc.Events)),
+		Enabled:     cfg.IsPluginEnabled(desc.PluginID),
+		Commands:    make(map[string]bool, len(desc.Commands)),
+		Events:      make(map[string]bool, len(desc.Events)),
+		Status:      "Unknown",
+		EnableSleep: true,
+		SleepTimeout: 60,
 	}
 	if control, ok := cfg.PluginControls[desc.PluginID]; ok {
 		state.CommandPrefix = control.CommandPrefix
+		if control.EnableSleep != nil {
+			state.EnableSleep = *control.EnableSleep
+		} else {
+			state.EnableSleep = true
+		}
+		if control.SleepTimeout > 0 {
+			state.SleepTimeout = control.SleepTimeout
+		} else {
+			state.SleepTimeout = cfg.GlobalSleepTimeout
+		}
+	} else {
+		state.SleepTimeout = cfg.GlobalSleepTimeout
 	}
 	for _, command := range desc.Commands {
 		state.Commands[command.ID] = cfg.IsCommandEnabled(desc.PluginID, command.ID)
@@ -141,6 +161,18 @@ func buildPluginState(cfg config.AppConfig, desc plugin.Descriptor) pluginStateV
 	for _, event := range desc.Events {
 		state.Events[event.ID] = cfg.IsEventEnabled(desc.PluginID, event.ID)
 	}
+
+	if p, _, ok := pm.Get(desc.PluginID); ok {
+		// Use background context for status check to avoid blocking web requests indefinitely.
+		// For LazyPlugin, this status check is safe and doesn't trigger wake-up.
+		status, err := p.Status(context.Background())
+		if err == nil {
+			state.Status = status
+		} else {
+			state.Status = "Crashed" // If status returns error, assume it's crashed or unreachable
+		}
+	}
+
 	return state
 }
 
@@ -150,6 +182,12 @@ func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatc
 	}
 	if patch.CommandPrefix != nil {
 		control.CommandPrefix = strings.TrimSpace(*patch.CommandPrefix)
+	}
+	if patch.EnableSleep != nil {
+		control.EnableSleep = patch.EnableSleep
+	}
+	if patch.SleepTimeout != nil {
+		control.SleepTimeout = *patch.SleepTimeout
 	}
 	if patch.Commands != nil {
 		control.DisabledCommands = applyListenerSwitches(control.DisabledCommands, patch.Commands)
@@ -398,7 +436,7 @@ func (s *Server) handlePluginSwitchesAPI(w http.ResponseWriter, r *http.Request,
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
-		"state": buildPluginState(cfg, desc),
+		"state": buildPluginState(r.Context(), s.pm, cfg, desc),
 	})
 }
 
@@ -623,9 +661,11 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		// 确保所有数组字段非 nil
 		plugin.EnsureDescriptorArrays(&desc)
 		
+		state := buildPluginState(r.Context(), s.pm, cfg, desc)
+
 		items = append(items, pluginListItem{
 			Descriptor: desc,
-			State:      buildPluginState(cfg, desc),
+			State:      state,
 		})
 	}
 	fmt.Printf("DEBUG: about to write JSON, items count: %d\n", len(items))
@@ -651,6 +691,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				Password   *string `json:"password"`
 			} `json:"webui"`
 			MessagePrefix *string `json:"message_prefix"`
+			GlobalSleepTimeout *int `json:"global_sleep_timeout"`
 			ChatLog       *struct {
 				DatabaseURI *string `json:"database_uri"`
 			} `json:"chat_log"`
@@ -681,6 +722,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if patch.MessagePrefix != nil {
 				c.MessagePrefix = strings.TrimSpace(*patch.MessagePrefix)
+			}
+			if patch.GlobalSleepTimeout != nil {
+				c.GlobalSleepTimeout = *patch.GlobalSleepTimeout
 			}
 			if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil {
 				c.ChatLog.DatabaseURI = strings.TrimSpace(*patch.ChatLog.DatabaseURI)

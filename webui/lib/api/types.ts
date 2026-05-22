@@ -20,6 +20,7 @@ export interface AppConfig {
   globals?: Record<string, string>;
   plugins?: Record<string, unknown>;
   message_prefix?: string;
+  global_sleep_timeout?: number;
 }
 
 export interface ConfigPatch {
@@ -42,6 +43,7 @@ export interface ConfigPatch {
     batch_interval?: string;
   };
   message_prefix?: string;
+  global_sleep_timeout?: number;
 }
 
 export interface PluginConfigSpec {
@@ -95,6 +97,7 @@ export interface PluginDescriptor {
   commands: CommandListener[];
   events: EventListener[];
   crons: CronListener[];
+  status?: "Running" | "Idle" | "Sleeping" | "Crashed";
 }
 
 export interface PluginStateView {
@@ -103,6 +106,9 @@ export interface PluginStateView {
   events: Record<string, boolean>;
   crons: Record<string, boolean>;
   command_prefix?: string;
+  enable_sleep?: boolean;
+  sleep_timeout?: number;
+  status?: "Running" | "Idle" | "Sleeping" | "Crashed" | "Unknown";
 }
 
 export interface PluginListItem extends PluginDescriptor {
@@ -132,6 +138,9 @@ export interface UpdatePluginSwitchesPayload {
   events?: Record<string, boolean>;
   crons?: Record<string, boolean>;
   prefix?: string;
+  enable_sleep?: boolean;
+  sleep_timeout?: number;
+  status?: "Running" | "Idle" | "Sleeping" | "Crashed" | "Unknown";
 }
 
 export interface UpdatePluginSwitchesResponse {

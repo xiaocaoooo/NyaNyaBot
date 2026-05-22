@@ -143,6 +143,10 @@ func (p *testContextPlugin) Handle(ctx context.Context, listenerID string, event
 	return papi.HandleResult{}, nil
 }
 
+func (p *testContextPlugin) Status(ctx context.Context) (string, error) {
+	return "running", nil
+}
+
 func (p *testContextPlugin) Shutdown(ctx context.Context) error {
 	return nil
 }

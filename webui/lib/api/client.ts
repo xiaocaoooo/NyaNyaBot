@@ -114,6 +114,9 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     events: state?.events ?? {},
     crons: state?.crons ?? {},
     command_prefix: state?.command_prefix ?? "",
+    enable_sleep: state?.enable_sleep ?? true,
+    sleep_timeout: state?.sleep_timeout ?? 60,
+    status: state?.status ?? "Unknown",
   };
 }
 

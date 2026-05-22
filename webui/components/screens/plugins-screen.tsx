@@ -449,6 +449,8 @@ export function PluginsScreen() {
   const [schemaConfig, setSchemaConfig] = useState<Record<string, unknown>>({});
   const [editorMode, setEditorMode] = useState<EditorMode>("json");
   const [pluginPrefix, setPluginPrefix] = useState<string>("");
+      const [enableSleep, setEnableSleep] = useState<boolean>(true);
+      const [sleepTimeout, setSleepTimeout] = useState<string>("60");
 
   const [loading, setLoading] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -473,12 +475,16 @@ export function PluginsScreen() {
     [schemaObject],
   );
 
-  // Keep local prefix input in sync with selected plugin's state from API
+  // Keep local state in sync with selected plugin's state from API
   useEffect(() => {
     if (selectedPlugin) {
       setPluginPrefix(selectedPlugin.state.command_prefix ?? "");
+      setEnableSleep(selectedPlugin.state.enable_sleep ?? true);
+      setSleepTimeout(String(selectedPlugin.state.sleep_timeout ?? 60));
     } else {
       setPluginPrefix("");
+      setEnableSleep(true);
+      setSleepTimeout("60");
     }
   }, [selectedPlugin]);
 
@@ -732,16 +738,38 @@ export function PluginsScreen() {
                             setSwitchError(null);
                           }}
                         >
-                          <p className="font-medium text-text">{plugin.name}</p>
-                          <p className="text-xs text-muted">{plugin.plugin_id}</p>
-                          {!plugin.state.enabled ? (
-                            <div className="mt-2">
-                              <Chip color="warning" radius="sm" size="sm" variant="flat">
-                                {t("plugins.schemaDisabled")}
-                              </Chip>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium text-text">{plugin.name}</p>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`h-2 w-2 rounded-full ${
+                                  !plugin.state.enabled
+                                    ? "bg-default-400"
+                                    : plugin.state.status === "Running"
+                                      ? "bg-success shadow-[0_0_8px_rgba(24,198,131,0.5)]"
+                                      : plugin.state.status === "Idle"
+                                        ? "bg-primary shadow-[0_0_8px_rgba(0,111,238,0.5)]"
+                                        : plugin.state.status === "Sleeping"
+                                          ? "bg-warning shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                                          : "bg-danger shadow-[0_0_8px_rgba(243,18,96,0.5)] animation-pulse"
+                                }`}
+                              />
+                              <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                                {!plugin.state.enabled ? t("plugins.statusDisabled") : t(`plugins.status${plugin.state.status ?? "Unknown"}`)}
+                              </span>
                             </div>
-                          ) : null}
-                        </button>
+                          </div>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted truncate flex-1">{plugin.plugin_id}</p>
+                        {!plugin.state.enabled ? (
+                          <div className="ml-2 flex-shrink-0">
+                            <Chip color="warning" radius="sm" size="sm" variant="flat" className="h-5 px-1 text-[10px]">
+                              {t("plugins.schemaDisabled")}
+                            </Chip>
+                          </div>
+                        ) : null}
+                      </div>
+                    </button>
                       </li>
                     );
                   })}
@@ -770,7 +798,33 @@ export function PluginsScreen() {
                           </p>
                           <p className="mt-2 text-sm text-text/90">{selectedPlugin.description || t("plugins.descriptionFallback")}</p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Chip
+                            classNames={{
+                              base: "h-6 px-1.5 border-none",
+                              content: "font-bold text-[10px] uppercase",
+                            }}
+                            color={
+                              !selectedPlugin.state.enabled
+                                ? "default"
+                                : selectedPlugin.state.status === "Running"
+                                  ? "success"
+                                  : selectedPlugin.state.status === "Idle"
+                                    ? "primary"
+                                    : selectedPlugin.state.status === "Sleeping"
+                                      ? "warning"
+                                      : selectedPlugin.state.status === "Crashed"
+                                        ? "danger"
+                                        : "default"
+                            }
+                            radius="sm"
+                            size="sm"
+                            variant="dot"
+                          >
+                            {!selectedPlugin.state.enabled
+                              ? t("plugins.statusDisabled")
+                              : t(`plugins.status${selectedPlugin.state.status ?? "Unknown"}`)}
+                          </Chip>
                           <Chip radius="sm" variant="flat">
                             {t("plugins.commands", { count: selectedPlugin.commands.length })}
                           </Chip>
@@ -838,6 +892,51 @@ export function PluginsScreen() {
                               if (!selectedPlugin) return;
                               await savePluginSwitches(selectedPlugin.plugin_id, {
                                 prefix: pluginPrefix.trim() || undefined,
+                              });
+                            }}
+                          >
+                            {t("plugins.saveConfig")}
+                          </AppButton>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3 sm:col-span-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-text">{t("plugins.autoSleepLabel")}</p>
+                            <p className="text-xs text-muted">{t("plugins.autoSleepDesc")}</p>
+                          </div>
+                          <Switch
+                            aria-label={t("plugins.autoSleepLabel")}
+                            isSelected={enableSleep}
+                            onValueChange={setEnableSleep}
+                          />
+                        </div>
+                        {enableSleep && (
+                          <div className="mt-4 space-y-1.5">
+                            <p className="text-sm font-medium text-text">{t("plugins.sleepDelayLabel")}</p>
+                            <p className="text-xs text-muted">{t("plugins.sleepDelayDesc")}</p>
+                            <AppInput
+                              aria-label={t("plugins.sleepDelayLabel")}
+                              type="number"
+                              value={sleepTimeout}
+                              onValueChange={setSleepTimeout}
+                            />
+                          </div>
+                        )}
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <AppButton
+                            size="sm"
+                            isDisabled={savingSwitches}
+                            onPress={async () => {
+                              if (!selectedPlugin) return;
+                              let timeout = Number.parseInt(sleepTimeout, 10);
+                              if (Number.isNaN(timeout)) timeout = 60;
+                              timeout = Math.max(60, Math.min(300, timeout));
+                              setSleepTimeout(String(timeout));
+                              await savePluginSwitches(selectedPlugin.plugin_id, {
+                                enable_sleep: enableSleep,
+                                sleep_timeout: timeout,
                               });
                             }}
                           >

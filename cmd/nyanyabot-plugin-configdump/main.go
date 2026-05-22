@@ -145,6 +145,10 @@ func (p *ConfigDump) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *ConfigDump) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 func (p *ConfigDump) handleCfg(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {

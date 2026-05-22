@@ -39,6 +39,11 @@ func (s *stubPlugin) Handle(ctx context.Context, listenerID string, eventRaw ob1
 	return HandleResult{}, nil
 }
 
+func (s *stubPlugin) Status(ctx context.Context) (string, error) {
+	_ = ctx
+	return "running", nil
+}
+
 func (s *stubPlugin) Shutdown(ctx context.Context) error {
 	_ = ctx
 	return nil

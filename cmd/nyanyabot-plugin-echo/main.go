@@ -103,6 +103,10 @@ func (e *Echo) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (e *Echo) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 func (e *Echo) handleEcho(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {

@@ -62,6 +62,10 @@ func (p *StatusPlugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (p *StatusPlugin) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 func (p *StatusPlugin) handleStatus(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()
 	if host == nil {

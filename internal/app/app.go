@@ -183,6 +183,14 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 			out[k] = v
 		}
 		return out
+	}, func(pluginID string) config.PluginControl {
+		cfg := store.Get()
+		if ctrl, ok := cfg.PluginControls[pluginID]; ok {
+			return ctrl
+		}
+		return config.PluginControl{}
+	}, func() int {
+		return store.Get().GlobalSleepTimeout
 	}, func(c context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error) {
 		// 如果有 TraceID，记录追踪信息
 		if traceID != "" {

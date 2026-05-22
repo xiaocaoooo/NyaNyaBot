@@ -107,6 +107,10 @@ func (c *CronTimePlugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (c *CronTimePlugin) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 // handleSetGroup 处理设置群号命令
 func (c *CronTimePlugin) handleSetGroup(ctx context.Context, eventRaw ob11.Event, match *papi.CommandMatch) (papi.HandleResult, error) {
 	host := transport.Host()

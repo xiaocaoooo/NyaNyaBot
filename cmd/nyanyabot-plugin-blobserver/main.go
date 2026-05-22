@@ -162,6 +162,10 @@ func (b *BlobServer) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (b *BlobServer) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 func appendTokenToURL(u string, token string) string {
 	u = strings.TrimSpace(u)
 	if u == "" || token == "" {

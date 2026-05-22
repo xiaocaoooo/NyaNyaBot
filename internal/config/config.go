@@ -38,6 +38,8 @@ type AppConfig struct {
 	// Only applies to group messages. Defaults to true.
 	MessageDedup *bool       `json:"message_dedup,omitempty"`
 	Dedup        DedupConfig `json:"dedup"`
+	// GlobalSleepTimeout defines the default sleep timeout in seconds for plugins.
+	GlobalSleepTimeout int `json:"global_sleep_timeout,omitempty"`
 }
 
 // PluginControl stores host-side enable/disable state.
@@ -48,6 +50,10 @@ type PluginControl struct {
 	DisabledCrons    []string `json:"disabled_crons,omitempty"`
 	// CommandPrefix overrides AppConfig.MessagePrefix for this plugin.
 	CommandPrefix string `json:"command_prefix,omitempty"`
+	// EnableSleep nil=use global, true/false=override
+	EnableSleep *bool `json:"enable_sleep,omitempty"`
+	// SleepTimeout 0=use global, >0=override
+	SleepTimeout int `json:"sleep_timeout,omitempty"`
 }
 
 type OneBotConfig struct {
@@ -215,6 +221,10 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		cfg.OneBot.ReverseWS.ListenAddr = defaultReverseWSListen
 		changed = true
 	}
+	if cfg.GlobalSleepTimeout <= 0 {
+		cfg.GlobalSleepTimeout = 60
+		changed = true
+	}
 	if cfg.WebUI.ListenAddr == "" {
 		cfg.WebUI.ListenAddr = "0.0.0.0:3000"
 		changed = true
@@ -368,7 +378,14 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		control.DisabledEvents = normalizeStringSlice(control.DisabledEvents)
 		control.DisabledCrons = normalizeStringSlice(control.DisabledCrons)
 		control.CommandPrefix = strings.TrimSpace(control.CommandPrefix)
-		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 && control.CommandPrefix == "" {
+		if control.EnableSleep == nil {
+			sleep := true
+			control.EnableSleep = &sleep
+		}
+		if control.SleepTimeout <= 0 {
+			control.SleepTimeout = 60
+		}
+		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 && control.CommandPrefix == "" && (control.EnableSleep != nil && *control.EnableSleep) && control.SleepTimeout == 60 {
 			continue
 		}
 		out[pluginID] = control
@@ -413,6 +430,15 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 			return false
 		}
 		if leftControl.CommandPrefix != strings.TrimSpace(rightControl.CommandPrefix) {
+			return false
+		}
+		if (leftControl.EnableSleep == nil) != (rightControl.EnableSleep == nil) {
+			return false
+		}
+		if leftControl.EnableSleep != nil && *leftControl.EnableSleep != *rightControl.EnableSleep {
+			return false
+		}
+		if leftControl.SleepTimeout != rightControl.SleepTimeout {
 			return false
 		}
 		if !stringSlicesEqual(leftControl.DisabledCommands, rightControl.DisabledCommands) {

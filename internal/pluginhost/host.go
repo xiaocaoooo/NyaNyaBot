@@ -20,6 +20,7 @@ import (
 
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/configtmpl"
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
 	papi "github.com/xiaocaoooo/nyanyabot/internal/plugin"
@@ -29,6 +30,7 @@ import (
 
 type pluginProcess interface {
 	Kill()
+	Exited() <-chan struct{}
 }
 
 // TraceRecord 追踪记录，使用抽象数据结构
@@ -51,6 +53,8 @@ type Host struct {
 	pm              *papi.Manager
 	getPluginConfig func() map[string]json.RawMessage
 	getGlobals      func() map[string]string
+	getControl      func(pluginID string) config.PluginControl
+	getGlobalSleepTimeout func() int
 
 	callOneBot func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error)
 	getStats   func(ctx context.Context) (transport.GetStatsReply, error)
@@ -61,25 +65,38 @@ type Host struct {
 	pluginSentStats map[string]*atomic.Int64
 	triggerRecorder *triggerlog.Recorder
 	logger          *slog.Logger
+
+	// For testing
+	starter func(ctx context.Context, exePath string) (*loadedCandidate, error)
 }
 
-func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, callOneBot func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
+func New(pm *papi.Manager, getPluginConfig func() map[string]json.RawMessage, getGlobals func() map[string]string, getControl func(pluginID string) config.PluginControl, getGlobalSleepTimeout func() int, callOneBot func(ctx context.Context, action string, params any, selfID int64, traceID string) (ob11.APIResponse, error), getStats func(ctx context.Context) (transport.GetStatsReply, error)) *Host {
 	if getPluginConfig == nil {
 		getPluginConfig = func() map[string]json.RawMessage { return nil }
 	}
 	if getGlobals == nil {
 		getGlobals = func() map[string]string { return nil }
 	}
-	return &Host{
-		pm:              pm,
-		getPluginConfig: getPluginConfig,
-		getGlobals:      getGlobals,
-		callOneBot:      callOneBot,
-		getStats:        getStats,
-		traceRecords:    make(map[string]*TraceRecord),
-		pluginSentStats: make(map[string]*atomic.Int64),
-		logger:          slog.Default(),
+	if getControl == nil {
+		getControl = func(pluginID string) config.PluginControl { return config.PluginControl{} }
 	}
+	if getGlobalSleepTimeout == nil {
+		getGlobalSleepTimeout = func() int { return 60 }
+	}
+	h := &Host{
+		pm:                    pm,
+		getPluginConfig:       getPluginConfig,
+		getGlobals:            getGlobals,
+		getControl:            getControl,
+		getGlobalSleepTimeout: getGlobalSleepTimeout,
+		callOneBot:            callOneBot,
+		getStats:              getStats,
+		traceRecords:          make(map[string]*TraceRecord),
+		pluginSentStats:       make(map[string]*atomic.Int64),
+		logger:                slog.Default(),
+	}
+	h.starter = h.startExecutableReal
+	return h
 }
 
 // BeginTrace 开始一个新的追踪记录
@@ -328,6 +345,18 @@ func (h hostAPI) GetStats(ctx context.Context) (transport.GetStatsReply, error) 
 func (h *Host) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	
+	// First, stop all registered plugins in PluginManager
+	// This ensures LazyPlugin can shutdown their processes correctly
+	for _, desc := range h.pm.List() {
+		p, _, ok := h.pm.Get(desc.PluginID)
+		if ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = p.Shutdown(ctx)
+			cancel()
+		}
+	}
+
 	for _, c := range h.clients {
 		c.Kill()
 	}
@@ -366,6 +395,13 @@ func (h *Host) LoadDir(ctx context.Context, dir string) error {
 
 	// Phase 1: start all plugin processes first.
 	for _, exePath := range execPaths {
+		// Optimization: if auto-sleep is enabled and no explicit config to disable it,
+		// we don't necessarily need to start it now for EVERY plugin if we had a way to get descriptor without starting.
+		// But go-plugin requires starting to get descriptor.
+		// To achieve "don't auto start", we would need to cache descriptors.
+		// For now, we follow the requirement: plugins with auto-sleep enabled should not stay running.
+		// They will start, get probed, and then immediately idle out.
+		
 		c, err := h.startExecutable(ctx, exePath)
 		if err != nil {
 			loadErrs = append(loadErrs, fmt.Errorf("start plugin %q: %w", exePath, err))
@@ -392,6 +428,36 @@ type loadedCandidate struct {
 }
 
 func (h *Host) startExecutable(ctx context.Context, exePath string) (*loadedCandidate, error) {
+	return h.starter(ctx, exePath)
+}
+
+type gopluginProcess struct {
+	*goplugin.Client
+}
+
+func (p gopluginProcess) Exited() <-chan struct{} {
+	// go-plugin client doesn't expose a chan for exit, but we can wrap it
+	// Actually, the original code had p.client.Exited() which suggests
+	// it was either a different version or a custom interface.
+	// Looking at LazyPlugin.monitorProcess:
+	// func (p *LazyPlugin) monitorProcess(client pluginProcess) {
+	//    <-client.Exited()
+	// ...
+	// So we must provide this.
+	ch := make(chan struct{})
+	go func() {
+		for {
+			if p.Client.Exited() {
+				close(ch)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+	return ch
+}
+
+func (h *Host) startExecutableReal(ctx context.Context, exePath string) (*loadedCandidate, error) {
 	_ = ctx
 	if strings.TrimSpace(exePath) == "" {
 		return nil, errors.New("exePath is empty")
@@ -431,7 +497,7 @@ func (h *Host) startExecutable(ctx context.Context, exePath string) (*loadedCand
 		return nil, fmt.Errorf("unexpected plugin type: %T", raw)
 	}
 
-	return &loadedCandidate{exePath: abs, client: client, plugin: p}, nil
+	return &loadedCandidate{exePath: abs, client: gopluginProcess{client}, plugin: p}, nil
 }
 
 func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCandidate) error {
@@ -521,26 +587,70 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 			continue
 		}
 
-		api := hostAPI{
-			host:           h,
-			callerPluginID: pluginID,
-			call:           h.callOneBot,
-			callDependency: h.callDependency,
-			getStats:       h.getStats,
+		ctrl := h.getControl(pluginID)
+		
+		// Use global default if plugin doesn't override
+		enableSleep := true
+		if ctrl.EnableSleep != nil {
+			enableSleep = *ctrl.EnableSleep
 		}
-		if err := c.plugin.AttachHost(ctx, api); err != nil {
-			errs = append(errs, fmt.Errorf("plugin %q attach host failed: %w", pluginID, err))
-			c.client.Kill()
-			continue
+		
+		sleepTimeout := ctrl.SleepTimeout
+		if sleepTimeout <= 0 {
+			sleepTimeout = h.getGlobalSleepTimeout()
 		}
 
-		if _, err := h.pm.RegisterWithDescriptor(ctx, c.plugin, c.desc); err != nil {
+		var p papi.Plugin
+		if enableSleep {
+			idleTimeout := time.Duration(sleepTimeout) * time.Second
+			lp := NewLazyPlugin(h, c.exePath, c.desc, idleTimeout)
+			// LazyPlugin takes ownership of the current process.
+			lp.client = c.client
+			lp.rpcClient = c.plugin
+			lp.activeCalls.Store(0)
+
+			// Initial attach host
+			api := hostAPI{
+				host:           h,
+				callerPluginID: pluginID,
+				call:           h.callOneBot,
+				callDependency: h.callDependency,
+				getStats:       h.getStats,
+			}
+			if err := c.plugin.AttachHost(ctx, api); err != nil {
+				errs = append(errs, fmt.Errorf("plugin %q attach host failed: %w", pluginID, err))
+				c.client.Kill()
+				continue
+			}
+
+			// Force-trigger idle start logic if it is already running.
+			// Because it is already running from probe, we want it to timeout and shutdown.
+			lp.leaveCall()
+
+			p = lp
+		} else {
+			api := hostAPI{
+				host:           h,
+				callerPluginID: pluginID,
+				call:           h.callOneBot,
+				callDependency: h.callDependency,
+				getStats:       h.getStats,
+			}
+			if err := c.plugin.AttachHost(ctx, api); err != nil {
+				errs = append(errs, fmt.Errorf("plugin %q attach host failed: %w", pluginID, err))
+				c.client.Kill()
+				continue
+			}
+			p = c.plugin
+		}
+
+		if _, err := h.pm.RegisterWithDescriptor(ctx, p, c.desc); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %q register failed: %w", pluginID, err))
 			c.client.Kill()
 			continue
 		}
 
-		h.pushPluginConfig(ctx, c.plugin, pluginID)
+		h.pushPluginConfig(ctx, p, pluginID)
 
 		h.mu.Lock()
 		h.clients = append(h.clients, c.client)
@@ -551,7 +661,7 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 	return errors.Join(errs...)
 }
 
-func (h *Host) pushPluginConfig(ctx context.Context, p *transport.PluginRPCClient, pluginID string) {
+func (h *Host) pushPluginConfig(ctx context.Context, p papi.Plugin, pluginID string) {
 	if h == nil || p == nil || h.getPluginConfig == nil {
 		return
 	}

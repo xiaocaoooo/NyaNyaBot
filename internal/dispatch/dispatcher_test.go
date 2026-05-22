@@ -48,6 +48,11 @@ func (p *recordingPlugin) Handle(ctx context.Context, listenerID string, eventRa
 	return plugin.HandleResult{}, nil
 }
 
+func (p *recordingPlugin) Status(ctx context.Context) (string, error) {
+	_ = ctx
+	return "running", nil
+}
+
 func (p *recordingPlugin) Shutdown(ctx context.Context) error {
 	_ = ctx
 	return nil

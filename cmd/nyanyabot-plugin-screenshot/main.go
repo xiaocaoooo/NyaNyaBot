@@ -170,6 +170,10 @@ func (s *Screenshot) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (s *Screenshot) Status(ctx context.Context) (string, error) {
+	return "OK", nil
+}
+
 func buildScreenshotURL(screenshotServer string, req buildURLParams) (string, error) {
 	base := normalizeHTTPBase(screenshotServer)
 	u, err := url.Parse(base)

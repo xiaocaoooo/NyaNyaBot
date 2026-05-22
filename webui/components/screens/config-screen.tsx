@@ -33,6 +33,7 @@ export function ConfigScreen() {
   const [reverseWSAddr, setReverseWSAddr] = useState("");
   const [chatLogDatabaseURI, setChatLogDatabaseURI] = useState("");
   const [messagePrefix, setMessagePrefix] = useState("");
+  const [globalSleepTimeout, setGlobalSleepTimeout] = useState("60");
   const [globalsRows, setGlobalsRows] = useState<GlobalRow[]>([createRow()]);
 
   // Trigger log config states
@@ -61,6 +62,7 @@ export function ConfigScreen() {
       setReverseWSAddr(configRes.onebot.reverse_ws.listen_addr ?? "");
       setChatLogDatabaseURI(configRes.chat_log?.database_uri ?? "");
       setMessagePrefix(configRes.message_prefix ?? "");
+      setGlobalSleepTimeout(String(configRes.global_sleep_timeout ?? 60));
 
       // Load trigger log config
       setTriggerLogEnabled(configRes.trigger_log?.enabled ?? false);
@@ -130,6 +132,7 @@ export function ConfigScreen() {
         chat_log: {
           database_uri: chatLogDatabaseURI.trim(),
         },
+        global_sleep_timeout: Number.parseInt(globalSleepTimeout, 10) || 60,
       });
       setStatus(t("config.statusSaveBasic"));
     } catch (err) {
@@ -225,7 +228,7 @@ export function ConfigScreen() {
 
       <div className="flex flex-wrap items-center gap-3">
         <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={loadData}>
-          {t("config.reload")}
+          {t("config.refresh")}
         </AppButton>
         {status ? <StatusMessage tone="success">{status}</StatusMessage> : null}
         {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
@@ -282,6 +285,19 @@ export function ConfigScreen() {
                 placeholder="postgres://user:pass@localhost:5432/nyanyabot?sslmode=disable"
                 value={chatLogDatabaseURI}
                 onValueChange={setChatLogDatabaseURI}
+              />
+            </FormField>
+
+            <FormField
+              description={t("config.globalSleepDesc")}
+              label={t("config.globalSleepLabel")}
+            >
+              <AppInput
+                aria-label={t("config.globalSleepAria")}
+                placeholder="60"
+                type="number"
+                value={globalSleepTimeout}
+                onValueChange={setGlobalSleepTimeout}
               />
             </FormField>
           </AppCardBody>

@@ -127,6 +127,15 @@ func (s *PluginRPCServer) Shutdown(_ struct{}, _ *struct{}) error {
 	return s.Impl.Shutdown(context.Background())
 }
 
+func (s *PluginRPCServer) Status(_ struct{}, resp *string) error {
+	st, err := s.Impl.Status(context.Background())
+	if err != nil {
+		return err
+	}
+	*resp = st
+	return nil
+}
+
 type AttachHostArgs struct {
 	BrokerID uint32 `json:"broker_id"`
 }
@@ -151,6 +160,10 @@ type PluginRPCClient struct {
 	client  *rpc.Client
 	broker  *plugin.MuxBroker
 	traceID string // 待传递的 TraceID
+}
+
+func NewPluginRPCClient(client *rpc.Client, broker *plugin.MuxBroker) *PluginRPCClient {
+	return &PluginRPCClient{client: client, broker: broker}
 }
 
 // In plugin process we keep a global host RPC client, so plugin implementations
@@ -212,6 +225,15 @@ func (c *PluginRPCClient) Shutdown(ctx context.Context) error {
 	_ = ctx
 	var out struct{}
 	return c.client.Call("Plugin.Shutdown", struct{}{}, &out)
+}
+
+func (c *PluginRPCClient) Status(ctx context.Context) (string, error) {
+	_ = ctx
+	var resp string
+	if err := c.client.Call("Plugin.Status", struct{}{}, &resp); err != nil {
+		return "", err
+	}
+	return resp, nil
 }
 
 func (c *PluginRPCClient) AttachHost(ctx context.Context, host HostAPI) error {

@@ -22,6 +22,7 @@ type Plugin interface {
 	// callerPluginID is set by host and cannot be forged by plugin side.
 	Invoke(ctx context.Context, method string, paramsJSON json.RawMessage, callerPluginID string) (resultJSON json.RawMessage, err error)
 	Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *CommandMatch) (HandleResult, error)
+	Status(ctx context.Context) (string, error)
 	Shutdown(ctx context.Context) error
 }
 

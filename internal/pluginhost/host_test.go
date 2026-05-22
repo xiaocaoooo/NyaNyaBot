@@ -8,10 +8,15 @@ import (
 
 type fakeProcess struct {
 	killed bool
+	exited chan struct{}
 }
 
 func (f *fakeProcess) Kill() {
 	f.killed = true
+}
+
+func (f *fakeProcess) Exited() <-chan struct{} {
+	return f.exited
 }
 
 func TestResolveDependencyOrderTopo(t *testing.T) {
@@ -77,9 +82,9 @@ func TestCycleRejectedPluginsAreClosed(t *testing.T) {
 		t.Fatalf("expected external.b rejected by cycle")
 	}
 
-	procA := &fakeProcess{}
-	procB := &fakeProcess{}
-	procC := &fakeProcess{}
+	procA := &fakeProcess{exited: make(chan struct{})}
+	procB := &fakeProcess{exited: make(chan struct{})}
+	procC := &fakeProcess{exited: make(chan struct{})}
 	byID := map[string]*loadedCandidate{
 		"external.a": {client: procA},
 		"external.b": {client: procB},

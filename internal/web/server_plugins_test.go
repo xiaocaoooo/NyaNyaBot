@@ -45,6 +45,11 @@ func (p *webStubPlugin) Handle(ctx context.Context, listenerID string, eventRaw 
 	return plugin.HandleResult{}, nil
 }
 
+func (p *webStubPlugin) Status(ctx context.Context) (string, error) {
+	_ = ctx
+	return "running", nil
+}
+
 func (p *webStubPlugin) Shutdown(ctx context.Context) error {
 	_ = ctx
 	return nil
