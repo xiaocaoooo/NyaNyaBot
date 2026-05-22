@@ -310,7 +310,7 @@ export function TriggerLogsScreen() {
               <AppButton startContent={<Search className="h-4 w-4" />} tone="primary" onPress={handleSearch}>
                 {t("triggerLogs.search")}
               </AppButton>
-              <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={fetchData}>
+              <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={() => fetchData()}>
                 {t("triggerLogs.refresh")}
               </AppButton>
               {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}

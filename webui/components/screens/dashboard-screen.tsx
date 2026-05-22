@@ -87,7 +87,7 @@ export function DashboardScreen() {
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
-        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={fetchData}>
+        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={() => fetchData()}>
           {t("dashboard.refresh")}
         </AppButton>
         {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}

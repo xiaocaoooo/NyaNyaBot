@@ -698,7 +698,7 @@ export function PluginsScreen() {
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
-        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={loadPlugins}>
+        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={() => loadPlugins()}>
           {t("plugins.refresh")}
         </AppButton>
         {status ? <StatusMessage tone="success">{status}</StatusMessage> : null}

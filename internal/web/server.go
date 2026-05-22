@@ -155,11 +155,23 @@ func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppCon
 	} else {
 		state.SleepTimeout = cfg.GlobalSleepTimeout
 	}
+	// 确保 Commands 和 Events 的遍历顺序确定性
+	commandKeys := make([]string, 0, len(desc.Commands))
 	for _, command := range desc.Commands {
-		state.Commands[command.ID] = cfg.IsCommandEnabled(desc.PluginID, command.ID)
+		commandKeys = append(commandKeys, command.ID)
 	}
+	sort.Strings(commandKeys)
+	for _, commandID := range commandKeys {
+		state.Commands[commandID] = cfg.IsCommandEnabled(desc.PluginID, commandID)
+	}
+
+	eventKeys := make([]string, 0, len(desc.Events))
 	for _, event := range desc.Events {
-		state.Events[event.ID] = cfg.IsEventEnabled(desc.PluginID, event.ID)
+		eventKeys = append(eventKeys, event.ID)
+	}
+	sort.Strings(eventKeys)
+	for _, eventID := range eventKeys {
+		state.Events[eventID] = cfg.IsEventEnabled(desc.PluginID, eventID)
 	}
 
 	if p, _, ok := pm.Get(desc.PluginID); ok {
@@ -622,7 +634,13 @@ func (s *Server) handleGlobals(w http.ResponseWriter, r *http.Request) {
 				c.Globals = make(map[string]string)
 			}
 			c.Globals = make(map[string]string, len(patch.Globals))
-			for k, v := range patch.Globals {
+			keys := make([]string, 0, len(patch.Globals))
+			for k := range patch.Globals {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				v := patch.Globals[k]
 				k = strings.TrimSpace(k)
 				if k == "" {
 					continue
