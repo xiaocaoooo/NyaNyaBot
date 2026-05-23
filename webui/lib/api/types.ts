@@ -1,3 +1,10 @@
+export interface AccessControl {
+  whitelist_users?: number[];
+  blacklist_users?: number[];
+  whitelist_groups?: number[];
+  blacklist_groups?: number[];
+}
+
 export interface AppConfig {
   onebot: {
     reverse_ws: {
@@ -23,6 +30,7 @@ export interface AppConfig {
   plugins?: Record<string, unknown>;
   message_prefix?: string;
   global_sleep_timeout?: number;
+  global_access?: AccessControl;
 }
 
 export interface ConfigPatch {
@@ -48,6 +56,7 @@ export interface ConfigPatch {
   };
   message_prefix?: string;
   global_sleep_timeout?: number;
+  global_access?: AccessControl;
 }
 
 export interface PluginConfigSpec {
@@ -113,6 +122,9 @@ export interface PluginStateView {
   enable_sleep?: boolean;
   sleep_timeout?: number;
   status?: "Running" | "Idle" | "Sleeping" | "Crashed" | "Unknown";
+  access?: AccessControl;
+  command_access?: Record<string, AccessControl>;
+  event_access?: Record<string, AccessControl>;
 }
 
 export interface PluginListItem extends PluginDescriptor {
@@ -145,6 +157,9 @@ export interface UpdatePluginSwitchesPayload {
   enable_sleep?: boolean;
   sleep_timeout?: number;
   status?: "Running" | "Idle" | "Sleeping" | "Crashed" | "Unknown";
+  access?: AccessControl;
+  command_access?: Record<string, AccessControl>;
+  event_access?: Record<string, AccessControl>;
 }
 
 export interface UpdatePluginSwitchesResponse {

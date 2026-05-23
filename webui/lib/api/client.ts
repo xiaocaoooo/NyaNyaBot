@@ -117,6 +117,9 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     enable_sleep: state?.enable_sleep ?? true,
     sleep_timeout: state?.sleep_timeout ?? 60,
     status: state?.status ?? "Unknown",
+    access: state?.access,
+    command_access: state?.command_access,
+    event_access: state?.event_access,
   };
 }
 
@@ -272,5 +275,8 @@ export const apiClient = {
     const url = queryString ? `/api/trigger-logs/stats?${queryString}` : "/api/trigger-logs/stats";
     
     return requestJSON<TriggerStatistics>(url);
+  },
+  fetchInfo(id: number, type: 'user' | 'group') {
+    return requestJSON<{ name: string }>(`/api/info?id=${id}&type=${type}`);
   },
 };

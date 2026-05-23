@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,22 +28,28 @@ type pluginConfigPatch struct {
 }
 
 type pluginSwitchPatch struct {
-	Enabled       *bool           `json:"enabled,omitempty"`
-	Commands      map[string]bool `json:"commands,omitempty"`
-	Events        map[string]bool `json:"events,omitempty"`
-	CommandPrefix *string         `json:"prefix,omitempty"`
-	EnableSleep   *bool           `json:"enable_sleep,omitempty"`
-	SleepTimeout  *int            `json:"sleep_timeout,omitempty"`
+	Enabled       *bool                           `json:"enabled,omitempty"`
+	Commands      map[string]bool                 `json:"commands,omitempty"`
+	Events        map[string]bool                 `json:"events,omitempty"`
+	CommandPrefix *string                         `json:"prefix,omitempty"`
+	EnableSleep   *bool                           `json:"enable_sleep,omitempty"`
+	SleepTimeout  *int                            `json:"sleep_timeout,omitempty"`
+	Access        *config.AccessControl           `json:"access,omitempty"`
+	CommandAccess map[string]config.AccessControl `json:"command_access,omitempty"`
+	EventAccess   map[string]config.AccessControl `json:"event_access,omitempty"`
 }
 
 type pluginStateView struct {
-	Enabled       bool            `json:"enabled"`
-	Commands      map[string]bool `json:"commands"`
-	Events        map[string]bool `json:"events"`
-	CommandPrefix string          `json:"command_prefix"`
-	EnableSleep   bool            `json:"enable_sleep"`
-	SleepTimeout  int             `json:"sleep_timeout"`
-	Status        string          `json:"status"`
+	Enabled       bool                            `json:"enabled"`
+	Commands      map[string]bool                 `json:"commands"`
+	Events        map[string]bool                 `json:"events"`
+	CommandPrefix string                          `json:"command_prefix"`
+	EnableSleep   bool                            `json:"enable_sleep"`
+	SleepTimeout  int                             `json:"sleep_timeout"`
+	Status        string                          `json:"status"`
+	Access        config.AccessControl            `json:"access"`
+	CommandAccess map[string]config.AccessControl `json:"command_access"`
+	EventAccess   map[string]config.AccessControl `json:"event_access"`
 }
 
 type pluginListItem struct {
@@ -105,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/plugins/", s.handlePluginSubAPI)
 	mux.HandleFunc("/api/trigger-logs", s.handleTriggerLogs)
 	mux.HandleFunc("/api/trigger-logs/stats", s.handleTriggerLogsStats)
+	mux.HandleFunc("/api/info", s.handleInfo)
 
 	// Serve exported Next.js static UI for all non-API routes.
 	mux.HandleFunc("/", s.handleFrontend)
@@ -133,15 +141,18 @@ func (s *Server) hotApplyAllPluginConfigs(ctx context.Context, cfg config.AppCon
 
 func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppConfig, desc plugin.Descriptor) pluginStateView {
 	state := pluginStateView{
-		Enabled:     cfg.IsPluginEnabled(desc.PluginID),
-		Commands:    make(map[string]bool, len(desc.Commands)),
-		Events:      make(map[string]bool, len(desc.Events)),
-		Status:      "Unknown",
-		EnableSleep: true,
+		Enabled:      cfg.IsPluginEnabled(desc.PluginID),
+		Commands:     make(map[string]bool, len(desc.Commands)),
+		Events:       make(map[string]bool, len(desc.Events)),
+		Status:       "Unknown",
+		EnableSleep:  true,
 		SleepTimeout: 60,
 	}
 	if control, ok := cfg.PluginControls[desc.PluginID]; ok {
 		state.CommandPrefix = control.CommandPrefix
+		state.Access = control.Access
+		state.CommandAccess = control.CommandAccess
+		state.EventAccess = control.EventAccess
 		if control.EnableSleep != nil {
 			state.EnableSleep = *control.EnableSleep
 		} else {
@@ -206,6 +217,15 @@ func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatc
 	}
 	if patch.Events != nil {
 		control.DisabledEvents = applyListenerSwitches(control.DisabledEvents, patch.Events)
+	}
+	if patch.Access != nil {
+		control.Access = *patch.Access
+	}
+	if patch.CommandAccess != nil {
+		control.CommandAccess = patch.CommandAccess
+	}
+	if patch.EventAccess != nil {
+		control.EventAccess = patch.EventAccess
 	}
 	return control
 }
@@ -678,7 +698,7 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	for _, desc := range plugins {
 		// 确保所有数组字段非 nil
 		plugin.EnsureDescriptorArrays(&desc)
-		
+
 		state := buildPluginState(r.Context(), s.pm, cfg, desc)
 
 		items = append(items, pluginListItem{
@@ -710,18 +730,18 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				AutoRefresh     *bool   `json:"auto_refresh"`
 				RefreshInterval *int    `json:"refresh_interval"`
 			} `json:"webui"`
-			MessagePrefix *string `json:"message_prefix"`
-			GlobalSleepTimeout *int `json:"global_sleep_timeout"`
-			ChatLog       *struct {
+			MessagePrefix      *string `json:"message_prefix"`
+			GlobalSleepTimeout *int    `json:"global_sleep_timeout"`
+			ChatLog            *struct {
 				DatabaseURI *string `json:"database_uri"`
 			} `json:"chat_log"`
-		TriggerLog *struct {
-			Enabled       *bool   `json:"enabled"`
-			DatabaseURI   *string `json:"database_uri"`
-			QueueSize     *int    `json:"queue_size"`
-			BatchSize     *int    `json:"batch_size"`
-			BatchInterval *string `json:"batch_interval"`
-		} `json:"trigger_log"`
+			TriggerLog *struct {
+				Enabled       *bool   `json:"enabled"`
+				DatabaseURI   *string `json:"database_uri"`
+				QueueSize     *int    `json:"queue_size"`
+				BatchSize     *int    `json:"batch_size"`
+				BatchInterval *string `json:"batch_interval"`
+			} `json:"trigger_log"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -757,23 +777,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil {
 				c.ChatLog.DatabaseURI = strings.TrimSpace(*patch.ChatLog.DatabaseURI)
 			}
-		if patch.TriggerLog != nil {
-			if patch.TriggerLog.Enabled != nil {
-				c.TriggerLog.Enabled = *patch.TriggerLog.Enabled
+			if patch.TriggerLog != nil {
+				if patch.TriggerLog.Enabled != nil {
+					c.TriggerLog.Enabled = *patch.TriggerLog.Enabled
+				}
+				if patch.TriggerLog.DatabaseURI != nil {
+					c.TriggerLog.DatabaseURI = strings.TrimSpace(*patch.TriggerLog.DatabaseURI)
+				}
+				if patch.TriggerLog.QueueSize != nil {
+					c.TriggerLog.QueueSize = *patch.TriggerLog.QueueSize
+				}
+				if patch.TriggerLog.BatchSize != nil {
+					c.TriggerLog.BatchSize = *patch.TriggerLog.BatchSize
+				}
+				if patch.TriggerLog.BatchInterval != nil {
+					c.TriggerLog.BatchInterval = strings.TrimSpace(*patch.TriggerLog.BatchInterval)
+				}
 			}
-			if patch.TriggerLog.DatabaseURI != nil {
-				c.TriggerLog.DatabaseURI = strings.TrimSpace(*patch.TriggerLog.DatabaseURI)
-			}
-			if patch.TriggerLog.QueueSize != nil {
-				c.TriggerLog.QueueSize = *patch.TriggerLog.QueueSize
-			}
-			if patch.TriggerLog.BatchSize != nil {
-				c.TriggerLog.BatchSize = *patch.TriggerLog.BatchSize
-			}
-			if patch.TriggerLog.BatchInterval != nil {
-				c.TriggerLog.BatchInterval = strings.TrimSpace(*patch.TriggerLog.BatchInterval)
-			}
-		}
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -782,14 +802,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.ChatLog != nil && patch.ChatLog.DatabaseURI != nil && s.onChatLogConfigChange != nil {
 			s.onChatLogConfigChange(r.Context(), cfg.ChatLog)
 		}
-	if patch.TriggerLog != nil && s.onTriggerLogConfigChange != nil {
-		// 只要 TriggerLog 有任何变化就触发回调
-		if patch.TriggerLog.Enabled != nil || patch.TriggerLog.DatabaseURI != nil ||
-			patch.TriggerLog.QueueSize != nil || patch.TriggerLog.BatchSize != nil ||
-			patch.TriggerLog.BatchInterval != nil {
-			s.onTriggerLogConfigChange(r.Context(), cfg.TriggerLog)
+		if patch.TriggerLog != nil && s.onTriggerLogConfigChange != nil {
+			// 只要 TriggerLog 有任何变化就触发回调
+			if patch.TriggerLog.Enabled != nil || patch.TriggerLog.DatabaseURI != nil ||
+				patch.TriggerLog.QueueSize != nil || patch.TriggerLog.BatchSize != nil ||
+				patch.TriggerLog.BatchInterval != nil {
+				s.onTriggerLogConfigChange(r.Context(), cfg.TriggerLog)
+			}
 		}
-	}
 		writeJSON(w, http.StatusOK, cfg)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1072,4 +1092,108 @@ func (s *Server) handleTriggerLogsStats(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.URL.Query().Get("id")
+	typeStr := r.URL.Query().Get("type")
+	if idStr == "" || typeStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing id or type"})
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid id"})
+		return
+	}
+
+	if s.reverseWSServer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "onebot not connected"})
+		return
+	}
+
+	var name string
+	var action string
+	var params map[string]any
+
+	if typeStr == "user" {
+		action = "get_stranger_info"
+		params = map[string]any{"user_id": idStr}
+	} else if typeStr == "group" {
+		action = "get_group_info"
+		params = map[string]any{"group_id": idStr}
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid type"})
+		return
+	}
+
+	botIDs := s.reverseWSServer.GetBotIDs()
+	if len(botIDs) == 0 {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "onebot not connected"})
+		return
+	}
+	sort.Slice(botIDs, func(i, j int) bool { return botIDs[i] < botIDs[j] })
+
+	selectedSelfID := botIDs[0]
+	if selfIDStr := r.URL.Query().Get("self_id"); selfIDStr != "" {
+		selfID, err := strconv.ParseInt(selfIDStr, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid self_id"})
+			return
+		}
+		selectedSelfID = selfID
+	} else if typeStr == "group" {
+		foundGroupBot := false
+		for _, bot := range s.reverseWSServer.GetBots() {
+			for _, group := range bot.Groups {
+				if group.GroupID == id {
+					selectedSelfID = bot.SelfID
+					foundGroupBot = true
+					break
+				}
+			}
+			if foundGroupBot {
+				break
+			}
+		}
+	}
+
+	resp, err := s.reverseWSServer.CallWithBot(r.Context(), selectedSelfID, action, params)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	if resp.Status != "ok" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": resp.Msg})
+		return
+	}
+
+	if typeStr == "user" {
+		var data struct {
+			Nickname string `json:"nickname"`
+		}
+		if err := json.Unmarshal(resp.Data, &data); err == nil {
+			name = data.Nickname
+		}
+	} else {
+		var data struct {
+			GroupName string `json:"group_name"`
+		}
+		if err := json.Unmarshal(resp.Data, &data); err == nil {
+			name = data.GroupName
+		}
+	}
+
+	if name == "" {
+		name = idStr
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }

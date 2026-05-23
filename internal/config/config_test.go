@@ -144,3 +144,186 @@ func TestLoadOrCreateDefaultNormalizesPluginControls(t *testing.T) {
 		t.Fatalf("expected normalized plugin controls persisted, got %#v", fromDisk.PluginControls)
 	}
 }
+
+func TestAccessControl(t *testing.T) {
+	tests := []struct {
+		name    string
+		ac      AccessControl
+		userID  int64
+		groupID int64
+		want    bool
+	}{
+		{
+			name: "empty access control",
+			ac:   AccessControl{},
+			userID: 123,
+			groupID: 456,
+			want: true,
+		},
+		{
+			name: "user in blacklist",
+			ac:   AccessControl{BlackListUsers: []int64{123}},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+		{
+			name: "group in blacklist",
+			ac:   AccessControl{BlackListGroups: []int64{456}},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+		{
+			name: "user in whitelist",
+			ac:   AccessControl{WhiteListUsers: []int64{123}},
+			userID: 123,
+			groupID: 456,
+			want: true,
+		},
+		{
+			name: "user not in whitelist",
+			ac:   AccessControl{WhiteListUsers: []int64{789}},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+		{
+			name: "group in whitelist",
+			ac:   AccessControl{WhiteListGroups: []int64{456}},
+			userID: 123,
+			groupID: 456,
+			want: true,
+		},
+		{
+			name: "group not in whitelist",
+			ac:   AccessControl{WhiteListGroups: []int64{789}},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+		{
+			name: "mixed whitelist OR - user match",
+			ac:   AccessControl{WhiteListUsers: []int64{123}, WhiteListGroups: []int64{789}},
+			userID: 123,
+			groupID: 456,
+			want: true,
+		},
+		{
+			name: "mixed whitelist OR - group match",
+			ac:   AccessControl{WhiteListUsers: []int64{789}, WhiteListGroups: []int64{456}},
+			userID: 123,
+			groupID: 456,
+			want: true,
+		},
+		{
+			name: "mixed whitelist OR - neither match",
+			ac:   AccessControl{WhiteListUsers: []int64{789}, WhiteListGroups: []int64{101}},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+		{
+			name: "blacklist priority over whitelist",
+			ac: AccessControl{
+				BlackListUsers: []int64{123},
+				WhiteListUsers: []int64{123},
+			},
+			userID: 123,
+			groupID: 456,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ac.Allowed(tt.userID, tt.groupID); got != tt.want {
+				t.Errorf("AccessControl.Allowed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppConfigIsAllowed(t *testing.T) {
+	cfg := AppConfig{
+		GlobalAccess: AccessControl{
+			BlackListUsers: []int64{999},
+		},
+		PluginControls: map[string]PluginControl{
+			"plugin.test": {
+				Access: AccessControl{
+					BlackListGroups: []int64{888},
+				},
+				CommandAccess: map[string]AccessControl{
+					"cmd.secret": {
+						WhiteListUsers: []int64{123},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		pluginID   string
+		listenerID string
+		isCommand  bool
+		userID     int64
+		groupID    int64
+		want       bool
+	}{
+		{
+			name: "global blacklist",
+			pluginID: "any",
+			listenerID: "any",
+			isCommand: true,
+			userID: 999,
+			groupID: 100,
+			want: false,
+		},
+		{
+			name: "plugin blacklist",
+			pluginID: "plugin.test",
+			listenerID: "any",
+			isCommand: true,
+			userID: 123,
+			groupID: 888,
+			want: false,
+		},
+		{
+			name: "command whitelist - match",
+			pluginID: "plugin.test",
+			listenerID: "cmd.secret",
+			isCommand: true,
+			userID: 123,
+			groupID: 100,
+			want: true,
+		},
+		{
+			name: "command whitelist - mismatch",
+			pluginID: "plugin.test",
+			listenerID: "cmd.secret",
+			isCommand: true,
+			userID: 456,
+			groupID: 100,
+			want: false,
+		},
+		{
+			name: "normal command - allow",
+			pluginID: "plugin.test",
+			listenerID: "cmd.normal",
+			isCommand: true,
+			userID: 456,
+			groupID: 100,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cfg.IsAllowed(tt.pluginID, tt.listenerID, tt.isCommand, tt.userID, tt.groupID); got != tt.want {
+				t.Errorf("AppConfig.IsAllowed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

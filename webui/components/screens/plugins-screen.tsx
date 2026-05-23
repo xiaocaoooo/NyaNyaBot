@@ -1,7 +1,7 @@
 "use client";
 
-import { Chip, Divider, Spinner, Switch, Tab, Tabs } from "@heroui/react";
-import { RefreshCw, Save } from "lucide-react";
+import { Chip, Divider, Spinner, Switch, Tab, Tabs, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
+import { RefreshCw, Save, Shield, RotateCcw } from "lucide-react";
 import { type Key, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppButton } from "@/components/ui/button";
@@ -10,9 +10,11 @@ import { AppCard, AppCardBody, AppCardFooter, AppCardHeader } from "@/components
 import { AppInput } from "@/components/ui/input";
 import { StatusMessage } from "@/components/ui/status-message";
 import { AppTextarea } from "@/components/ui/textarea";
+import { AccessControlPanel } from "@/components/ui/access-control-panel";
 import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 import { apiClient } from "@/lib/api/client";
-import type { PluginListItem } from "@/lib/api/types";
+import type { PluginListItem, AccessControl } from "@/lib/api/types";
+import { FormField } from "@/components/ui/form-field";
 
 console.log('🚀 plugins-screen.tsx 文件已加载');
 
@@ -450,8 +452,16 @@ export function PluginsScreen() {
   const [schemaConfig, setSchemaConfig] = useState<Record<string, unknown>>({});
   const [editorMode, setEditorMode] = useState<EditorMode>("json");
   const [pluginPrefix, setPluginPrefix] = useState<string>("");
-      const [enableSleep, setEnableSleep] = useState<boolean>(true);
-      const [sleepTimeout, setSleepTimeout] = useState<string>("60");
+  const [enableSleep, setEnableSleep] = useState<boolean>(true);
+  const [sleepTimeout, setSleepTimeout] = useState<string>("60");
+
+  const { isOpen, onOpen, onOpenChange } = useDisclosure();
+  const [acTitle, setAcTitle] = useState("");
+  const [acWhitelistUsers, setAcWhitelistUsers] = useState("");
+  const [acBlacklistUsers, setAcBlacklistUsers] = useState("");
+  const [acWhitelistGroups, setAcWhitelistGroups] = useState("");
+  const [acBlacklistGroups, setAcBlacklistGroups] = useState("");
+  const [acTarget, setAcTarget] = useState<{ type: 'plugin' | 'command' | 'event', id?: string }>({ type: 'plugin' });
 
   const [loading, setLoading] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -574,6 +584,61 @@ export function PluginsScreen() {
     },
     [t, updateLocalPluginState],
   );
+
+  const parseIds = (raw: string): number[] => {
+    return raw
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !isNaN(n));
+  };
+
+  const openAccessControl = useCallback((type: 'plugin' | 'command' | 'event', id?: string, name?: string) => {
+    if (!selectedPlugin) return;
+    setAcTarget({ type, id });
+
+    let ac: AccessControl | undefined;
+    if (type === 'plugin') {
+      setAcTitle(`${t("plugins.pluginAccessControl")}: ${selectedPlugin.name}`);
+      ac = selectedPlugin.state.access;
+    } else if (type === 'command' && id) {
+      setAcTitle(`${t("plugins.commandAccessControl")}: ${name || id}`);
+      ac = selectedPlugin.state.command_access?.[id];
+    } else if (type === 'event' && id) {
+      setAcTitle(`${t("plugins.eventAccessControl")}: ${name || id}`);
+      ac = selectedPlugin.state.event_access?.[id];
+    }
+
+    setAcWhitelistUsers(ac?.whitelist_users?.join("\n") ?? "");
+    setAcBlacklistUsers(ac?.blacklist_users?.join("\n") ?? "");
+    setAcWhitelistGroups(ac?.whitelist_groups?.join("\n") ?? "");
+    setAcBlacklistGroups(ac?.blacklist_groups?.join("\n") ?? "");
+    onOpen();
+  }, [selectedPlugin, t, onOpen]);
+
+  const saveAccessControl = async () => {
+    if (!selectedPlugin) return;
+
+    const ac: AccessControl = {
+      whitelist_users: parseIds(acWhitelistUsers),
+      blacklist_users: parseIds(acBlacklistUsers),
+      whitelist_groups: parseIds(acWhitelistGroups),
+      blacklist_groups: parseIds(acBlacklistGroups),
+    };
+
+    const payload: Parameters<typeof apiClient.updatePluginSwitches>[1] = {};
+    if (acTarget.type === 'plugin') {
+      payload.access = ac;
+    } else if (acTarget.type === 'command' && acTarget.id) {
+      payload.command_access = { [acTarget.id]: ac };
+    } else if (acTarget.type === 'event' && acTarget.id) {
+      payload.event_access = { [acTarget.id]: ac };
+    }
+
+    await savePluginSwitches(selectedPlugin.plugin_id, payload);
+    onOpenChange(); // Close modal
+  };
 
   const handlePluginToggle = useCallback(
     async (nextEnabled: boolean) => {
@@ -866,6 +931,16 @@ export function PluginsScreen() {
                             onValueChange={handlePluginToggle}
                           />
                         </div>
+                        <div className="mt-3 flex items-center justify-end">
+                          <AppButton
+                            size="sm"
+                            startContent={<Shield className="h-4 w-4" />}
+                            tone="ghost"
+                            onPress={() => openAccessControl('plugin')}
+                          >
+                            {t("plugins.accessControlTitle")}
+                          </AppButton>
+                        </div>
                       </div>
                     </div>
 
@@ -977,9 +1052,19 @@ export function PluginsScreen() {
                                         void handleCommandToggle(command.id, next);
                                       }}
                                     />
-                                    <Chip radius="sm" size="sm" variant="flat">
-                                      {commandEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
-                                    </Chip>
+                                    <div className="flex items-center gap-1">
+                                      <Chip radius="sm" size="sm" variant="flat">
+                                        {commandEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                                      </Chip>
+                                      <AppButton
+                                        isIconOnly
+                                        size="sm"
+                                        tone="ghost"
+                                        onPress={() => openAccessControl('command', command.id, command.name)}
+                                      >
+                                        <Shield className="h-4 w-4" />
+                                      </AppButton>
+                                    </div>
                                   </div>
                                 </li>
                               );
@@ -1018,9 +1103,19 @@ export function PluginsScreen() {
                                         void handleEventToggle(event.id, next);
                                       }}
                                     />
-                                    <Chip radius="sm" size="sm" variant="flat">
-                                      {eventEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
-                                    </Chip>
+                                    <div className="flex items-center gap-1">
+                                      <Chip radius="sm" size="sm" variant="flat">
+                                        {eventEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
+                                      </Chip>
+                                      <AppButton
+                                        isIconOnly
+                                        size="sm"
+                                        tone="ghost"
+                                        onPress={() => openAccessControl('event', event.id, event.name)}
+                                      >
+                                        <Shield className="h-4 w-4" />
+                                      </AppButton>
+                                    </div>
                                   </div>
                                 </li>
                               );
@@ -1220,6 +1315,72 @@ export function PluginsScreen() {
           </div>
         </div>
       )}
+
+      <Modal isOpen={isOpen} onOpenChange={onOpenChange} size="3xl" scrollBehavior="inside">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex items-center gap-2 border-b border-border/50 pb-4">
+                <Shield className="h-5 w-5 text-primary" />
+                <div className="flex flex-col">
+                  <span className="text-lg font-bold">{acTitle}</span>
+                  <span className="text-xs font-normal text-muted">{t("plugins.accessControlDesc")}</span>
+                </div>
+              </ModalHeader>
+              <ModalBody className="py-6">
+                <AccessControlPanel
+                  whitelistUsers={acWhitelistUsers}
+                  setWhitelistUsers={setAcWhitelistUsers}
+                  blacklistUsers={acBlacklistUsers}
+                  setBlacklistUsers={setAcBlacklistUsers}
+                  whitelistGroups={acWhitelistGroups}
+                  setWhitelistGroups={setAcWhitelistGroups}
+                  blacklistGroups={acBlacklistGroups}
+                  setBlacklistGroups={setAcBlacklistGroups}
+                />
+              </ModalBody>
+              <ModalFooter className="border-t border-border/50 pt-4">
+                <AppButton 
+                  tone="neutral" 
+                  variant="ghost"
+                  startContent={<RotateCcw className="h-4 w-4" />}
+                  onPress={() => {
+                    if (acTarget.type === 'plugin') {
+                      const ac = selectedPlugin?.state.access;
+                      setAcWhitelistUsers(ac?.whitelist_users?.join("\n") ?? "");
+                      setAcBlacklistUsers(ac?.blacklist_users?.join("\n") ?? "");
+                      setAcWhitelistGroups(ac?.whitelist_groups?.join("\n") ?? "");
+                      setAcBlacklistGroups(ac?.blacklist_groups?.join("\n") ?? "");
+                    } else if (acTarget.id) {
+                      const ac = acTarget.type === 'command' 
+                        ? selectedPlugin?.state.command_access?.[acTarget.id] 
+                        : selectedPlugin?.state.event_access?.[acTarget.id];
+                      setAcWhitelistUsers(ac?.whitelist_users?.join("\n") ?? "");
+                      setAcBlacklistUsers(ac?.blacklist_users?.join("\n") ?? "");
+                      setAcWhitelistGroups(ac?.whitelist_groups?.join("\n") ?? "");
+                      setAcBlacklistGroups(ac?.blacklist_groups?.join("\n") ?? "");
+                    }
+                  }}
+                >
+                  {t("triggerLogs.reset")}
+                </AppButton>
+                <div className="flex-1" />
+                <AppButton tone="neutral" onPress={onClose}>
+                  {t("triggerLogs.hideDetails")}
+                </AppButton>
+                <AppButton
+                  color="primary"
+                  isLoading={savingSwitches}
+                  startContent={<Save className="h-4 w-4" />}
+                  onPress={saveAccessControl}
+                >
+                  {t("plugins.saveAccessControl")}
+                </AppButton>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </section>
   );
 }

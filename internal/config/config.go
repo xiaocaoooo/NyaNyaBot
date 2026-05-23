@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -32,8 +33,10 @@ type AppConfig struct {
 	Plugins map[string]json.RawMessage `json:"plugins,omitempty"`
 	// PluginControls stores host-side runtime switches for plugins and listeners.
 	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
-	ChatLog        ChatLogConfig            `json:"chat_log"`
-	TriggerLog     TriggerLogConfig         `json:"trigger_log"`
+	// GlobalAccess controls access across all plugins and commands.
+	GlobalAccess AccessControl `json:"global_access,omitempty"`
+	ChatLog      ChatLogConfig `json:"chat_log"`
+	TriggerLog   TriggerLogConfig `json:"trigger_log"`
 	// MessageDedup enables message deduplication based on group_id + message_seq.
 	// Only applies to group messages. Defaults to true.
 	MessageDedup *bool       `json:"message_dedup,omitempty"`
@@ -42,18 +45,92 @@ type AppConfig struct {
 	GlobalSleepTimeout int `json:"global_sleep_timeout,omitempty"`
 }
 
+// AccessControl defines whitelist and blacklist for users and groups.
+type AccessControl struct {
+	WhiteListUsers  []int64 `json:"whitelist_users,omitempty"`
+	BlackListUsers  []int64 `json:"blacklist_users,omitempty"`
+	WhiteListGroups []int64 `json:"whitelist_groups,omitempty"`
+	BlackListGroups []int64 `json:"blacklist_groups,omitempty"`
+}
+
+// Allowed returns true if the user and group are allowed based on the rules.
+func (ac AccessControl) Allowed(userID, groupID int64) bool {
+	// 1. Blacklist check (highest priority)
+	for _, id := range ac.BlackListUsers {
+		if id == userID {
+			return false
+		}
+	}
+	if groupID > 0 {
+		for _, id := range ac.BlackListGroups {
+			if id == groupID {
+				return false
+			}
+		}
+	}
+
+	// 2. Whitelist check
+	hasUserWhitelist := len(ac.WhiteListUsers) > 0
+	hasGroupWhitelist := len(ac.WhiteListGroups) > 0
+
+	if !hasUserWhitelist && !hasGroupWhitelist {
+		// Both empty: allow all
+		return true
+	}
+
+	// Mixed mode OR logic: if either user or group is whitelisted, allow.
+	if hasUserWhitelist {
+		for _, id := range ac.WhiteListUsers {
+			if id == userID {
+				return true
+			}
+		}
+	}
+	if hasGroupWhitelist && groupID > 0 {
+		for _, id := range ac.WhiteListGroups {
+			if id == groupID {
+				return true
+			}
+		}
+	}
+
+	// Has whitelist but no match
+	return false
+}
+
+func (ac AccessControl) IsEmpty() bool {
+	return len(ac.WhiteListUsers) == 0 && len(ac.BlackListUsers) == 0 &&
+		len(ac.WhiteListGroups) == 0 && len(ac.BlackListGroups) == 0
+}
+
 // PluginControl stores host-side enable/disable state.
 type PluginControl struct {
-	Disabled         bool     `json:"disabled,omitempty"`
-	DisabledCommands []string `json:"disabled_commands,omitempty"`
-	DisabledEvents   []string `json:"disabled_events,omitempty"`
-	DisabledCrons    []string `json:"disabled_crons,omitempty"`
+	Disabled         bool                     `json:"disabled,omitempty"`
+	DisabledCommands []string                 `json:"disabled_commands,omitempty"`
+	DisabledEvents   []string                 `json:"disabled_events,omitempty"`
+	DisabledCrons    []string                 `json:"disabled_crons,omitempty"`
+	Access           AccessControl            `json:"access,omitempty"`
+	CommandAccess    map[string]AccessControl `json:"command_access,omitempty"`
+	EventAccess      map[string]AccessControl `json:"event_access,omitempty"`
 	// CommandPrefix overrides AppConfig.MessagePrefix for this plugin.
 	CommandPrefix string `json:"command_prefix,omitempty"`
 	// EnableSleep nil=use global, true/false=override
 	EnableSleep *bool `json:"enable_sleep,omitempty"`
 	// SleepTimeout 0=use global, >0=override
 	SleepTimeout int `json:"sleep_timeout,omitempty"`
+}
+
+func (pc PluginControl) IsEmpty() bool {
+	if pc.Disabled || len(pc.DisabledCommands) > 0 || len(pc.DisabledEvents) > 0 || len(pc.DisabledCrons) > 0 {
+		return false
+	}
+	if !pc.Access.IsEmpty() || len(pc.CommandAccess) > 0 || len(pc.EventAccess) > 0 {
+		return false
+	}
+	if pc.CommandPrefix != "" || (pc.EnableSleep != nil && !*pc.EnableSleep) || (pc.SleepTimeout != 0 && pc.SleepTimeout != 60) {
+		return false
+	}
+	return true
 }
 
 type OneBotConfig struct {
@@ -273,6 +350,7 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		cfg.MessageDedup = &dedupEnabled
 		changed = true
 	}
+	cfg.GlobalAccess = normalizeAccessControl(cfg.GlobalAccess)
 	normalizedControls := normalizePluginControls(cfg.PluginControls)
 	if !pluginControlsEqual(cfg.PluginControls, normalizedControls) {
 		cfg.PluginControls = normalizedControls
@@ -379,6 +457,46 @@ func (c AppConfig) IsMessageDedupEnabled() bool {
 	return *c.MessageDedup
 }
 
+func (c AppConfig) IsAllowed(pluginID, listenerID string, isCommand bool, userID, groupID int64) bool {
+	// 1) Global level
+	if !c.GlobalAccess.Allowed(userID, groupID) {
+		return false
+	}
+
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return true
+	}
+
+	control, ok := c.PluginControls[pluginID]
+	if !ok {
+		return true
+	}
+
+	// 2) Plugin level
+	if !control.Access.Allowed(userID, groupID) {
+		return false
+	}
+
+	// 3) Listener level (Command or Event)
+	listenerID = strings.TrimSpace(listenerID)
+	if listenerID == "" {
+		return true
+	}
+
+	if isCommand {
+		if ac, ok := control.CommandAccess[listenerID]; ok {
+			return ac.Allowed(userID, groupID)
+		}
+	} else {
+		if ac, ok := control.EventAccess[listenerID]; ok {
+			return ac.Allowed(userID, groupID)
+		}
+	}
+
+	return true
+}
+
 func normalizePluginControls(in map[string]PluginControl) map[string]PluginControl {
 	if in == nil {
 		return map[string]PluginControl{}
@@ -393,6 +511,21 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		control.DisabledEvents = normalizeStringSlice(control.DisabledEvents)
 		control.DisabledCrons = normalizeStringSlice(control.DisabledCrons)
 		control.CommandPrefix = strings.TrimSpace(control.CommandPrefix)
+		control.Access = normalizeAccessControl(control.Access)
+		if control.CommandAccess != nil {
+			newCA := make(map[string]AccessControl, len(control.CommandAccess))
+			for k, v := range control.CommandAccess {
+				newCA[strings.TrimSpace(k)] = normalizeAccessControl(v)
+			}
+			control.CommandAccess = newCA
+		}
+		if control.EventAccess != nil {
+			newEA := make(map[string]AccessControl, len(control.EventAccess))
+			for k, v := range control.EventAccess {
+				newEA[strings.TrimSpace(k)] = normalizeAccessControl(v)
+			}
+			control.EventAccess = newEA
+		}
 		if control.EnableSleep == nil {
 			sleep := true
 			control.EnableSleep = &sleep
@@ -400,11 +533,40 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		if control.SleepTimeout <= 0 {
 			control.SleepTimeout = 60
 		}
-		if !control.Disabled && len(control.DisabledCommands) == 0 && len(control.DisabledEvents) == 0 && control.CommandPrefix == "" && (control.EnableSleep != nil && *control.EnableSleep) && control.SleepTimeout == 60 {
+		if control.IsEmpty() {
 			continue
 		}
 		out[pluginID] = control
 	}
+	return out
+}
+
+func normalizeAccessControl(ac AccessControl) AccessControl {
+	ac.WhiteListUsers = normalizeInt64Slice(ac.WhiteListUsers)
+	ac.BlackListUsers = normalizeInt64Slice(ac.BlackListUsers)
+	ac.WhiteListGroups = normalizeInt64Slice(ac.WhiteListGroups)
+	ac.BlackListGroups = normalizeInt64Slice(ac.BlackListGroups)
+	return ac
+}
+
+func normalizeInt64Slice(in []int64) []int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]int64, 0, len(in))
+	for _, item := range in {
+		s := strconv.FormatInt(item, 10)
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
@@ -460,6 +622,47 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 			return false
 		}
 		if !stringSlicesEqual(leftControl.DisabledEvents, rightControl.DisabledEvents) {
+			return false
+		}
+		if !accessControlEqual(leftControl.Access, rightControl.Access) {
+			return false
+		}
+		if !accessControlMapEqual(leftControl.CommandAccess, rightControl.CommandAccess) {
+			return false
+		}
+		if !accessControlMapEqual(leftControl.EventAccess, rightControl.EventAccess) {
+			return false
+		}
+	}
+	return true
+}
+
+func accessControlEqual(left, right AccessControl) bool {
+	return int64SlicesEqual(left.WhiteListUsers, right.WhiteListUsers) &&
+		int64SlicesEqual(left.BlackListUsers, right.BlackListUsers) &&
+		int64SlicesEqual(left.WhiteListGroups, right.WhiteListGroups) &&
+		int64SlicesEqual(left.BlackListGroups, right.BlackListGroups)
+}
+
+func accessControlMapEqual(left, right map[string]AccessControl) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for k, v := range left {
+		rv, ok := right[k]
+		if !ok || !accessControlEqual(v, rv) {
+			return false
+		}
+	}
+	return true
+}
+
+func int64SlicesEqual(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
 			return false
 		}
 	}

@@ -114,6 +114,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 	// 提取消息元数据（用于追踪）
 	groupID := getString(raw, "group_id")
 	userID := getString(raw, "user_id")
+	groupIDInt := parseIntOrZero(groupID)
+	userIDInt := parseIntOrZero(userID)
 	messageSeq := getString(raw, "real_seq")
 	rawMsg := getString(raw, "raw_message")
 
@@ -149,6 +151,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 		}
 		for _, l := range desc.Events {
 			if !cfg.IsEventEnabled(pid, l.ID) {
+				continue
+			}
+			if !cfg.IsAllowed(pid, l.ID, false, userIDInt, groupIDInt) {
+				d.logger.Info("[dispatch] access denied for event",
+					"plugin_id", pid,
+					"event_id", l.ID,
+					"user_id", userIDInt,
+					"group_id", groupIDInt,
+				)
 				continue
 			}
 			if matchEvent(l.Event, eventKey, eventKeyFull) {
@@ -335,6 +346,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 		}
 		for _, c := range desc.Commands {
 			if !cfg.IsCommandEnabled(pid, c.ID) {
+				continue
+			}
+			if !cfg.IsAllowed(pid, c.ID, true, userIDInt, groupIDInt) {
+				d.logger.Info("[dispatch] access denied for command",
+					"plugin_id", pid,
+					"command_id", c.ID,
+					"user_id", userIDInt,
+					"group_id", groupIDInt,
+				)
 				continue
 			}
 			input := content

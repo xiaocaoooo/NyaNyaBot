@@ -1,7 +1,7 @@
 "use client";
 
 import { Divider, Spinner, Switch } from "@heroui/react";
-import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Save, Trash2, Shield } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
@@ -11,7 +11,9 @@ import { FormField } from "@/components/ui/form-field";
 import { AppInput } from "@/components/ui/input";
 import { useI18n } from "@/components/providers/i18n-provider";
 import { StatusMessage } from "@/components/ui/status-message";
+import { AccessControlPanel } from "@/components/ui/access-control-panel";
 import { apiClient } from "@/lib/api/client";
+import { AccessControl } from "@/lib/api/types";
 
 interface GlobalRow {
   id: string;
@@ -45,11 +47,18 @@ export function ConfigScreen() {
   const [triggerLogBatchSize, setTriggerLogBatchSize] = useState("100");
   const [triggerLogBatchInterval, setTriggerLogBatchInterval] = useState("5s");
 
+  // Access control states
+  const [whitelistUsers, setWhitelistUsers] = useState("");
+  const [blacklistUsers, setBlacklistUsers] = useState("");
+  const [whitelistGroups, setWhitelistGroups] = useState("");
+  const [blacklistGroups, setBlacklistGroups] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingGlobals, setSavingGlobals] = useState(false);
   const [savingPrefix, setSavingPrefix] = useState(false);
   const [savingTriggerLog, setSavingTriggerLog] = useState(false);
+  const [savingAccessControl, setSavingAccessControl] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -74,6 +83,12 @@ export function ConfigScreen() {
       setTriggerLogQueueSize(String(configRes.trigger_log?.queue_size ?? 1000));
       setTriggerLogBatchSize(String(configRes.trigger_log?.batch_size ?? 100));
       setTriggerLogBatchInterval(configRes.trigger_log?.batch_interval ?? "5s");
+
+      // Load access control
+      setWhitelistUsers(configRes.global_access?.whitelist_users?.join("\n") ?? "");
+      setBlacklistUsers(configRes.global_access?.blacklist_users?.join("\n") ?? "");
+      setWhitelistGroups(configRes.global_access?.whitelist_groups?.join("\n") ?? "");
+      setBlacklistGroups(configRes.global_access?.blacklist_groups?.join("\n") ?? "");
 
       const rows = Object.entries(globalsRes.globals ?? {}).map(([key, value]) => ({
         id: Math.random().toString(36).slice(2),
@@ -217,6 +232,39 @@ export function ConfigScreen() {
     }
   };
 
+  const parseIds = (raw: string): number[] => {
+    return raw
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !isNaN(n));
+  };
+
+  const saveAccessControl = async () => {
+    setSavingAccessControl(true);
+    setStatus(null);
+    setError(null);
+
+    try {
+      const global_access: AccessControl = {
+        whitelist_users: parseIds(whitelistUsers),
+        blacklist_users: parseIds(blacklistUsers),
+        whitelist_groups: parseIds(whitelistGroups),
+        blacklist_groups: parseIds(blacklistGroups),
+      };
+
+      await apiClient.updateConfig({
+        global_access,
+      });
+      setStatus(t("config.statusSaveAccessControl"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("config.errorSaveAccessControl"));
+    } finally {
+      setSavingAccessControl(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[260px] items-center justify-center">
@@ -347,7 +395,40 @@ export function ConfigScreen() {
           </AppCardFooter>
         </AppCard>
 
-          <AppCard className="lg:col-span-7">
+        <AppCard className="lg:col-span-12">
+          <AppCardHeader>
+            <div className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold text-text">{t("config.accessControlTitle")}</h2>
+            </div>
+            <p className="text-sm text-muted">{t("config.accessControlDesc")}</p>
+          </AppCardHeader>
+          <AppCardBody>
+            <AccessControlPanel
+              whitelistUsers={whitelistUsers}
+              setWhitelistUsers={setWhitelistUsers}
+              blacklistUsers={blacklistUsers}
+              setBlacklistUsers={setBlacklistUsers}
+              whitelistGroups={whitelistGroups}
+              setWhitelistGroups={setWhitelistGroups}
+              blacklistGroups={blacklistGroups}
+              setBlacklistGroups={setBlacklistGroups}
+            />
+          </AppCardBody>
+          <AppCardFooter>
+            <AppButton
+              color="primary"
+              isLoading={savingAccessControl}
+              startContent={<Save className="h-4 w-4" />}
+              onPress={saveAccessControl}
+            >
+              {t("config.saveAccessControl")}
+            </AppButton>
+          </AppCardFooter>
+        </AppCard>
+
+        <AppCard className="lg:col-span-7">
+
           <AppCardHeader>
             <h2 className="text-lg font-semibold text-text">{t("config.prefixTitle")}</h2>
             <p className="text-sm text-muted">{t("config.prefixDesc")}</p>
