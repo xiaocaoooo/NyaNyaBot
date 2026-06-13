@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
+	"github.com/xiaocaoooo/nyanyabot/internal/util"
 )
 
 type pluginConfigPatch struct {
@@ -28,28 +30,30 @@ type pluginConfigPatch struct {
 }
 
 type pluginSwitchPatch struct {
-	Enabled       *bool                           `json:"enabled,omitempty"`
-	Commands      map[string]bool                 `json:"commands,omitempty"`
-	Events        map[string]bool                 `json:"events,omitempty"`
-	CommandPrefix *string                         `json:"prefix,omitempty"`
-	EnableSleep   *bool                           `json:"enable_sleep,omitempty"`
-	SleepTimeout  *int                            `json:"sleep_timeout,omitempty"`
-	Access        *config.AccessControl           `json:"access,omitempty"`
-	CommandAccess map[string]config.AccessControl `json:"command_access,omitempty"`
-	EventAccess   map[string]config.AccessControl `json:"event_access,omitempty"`
+	Enabled          *bool                           `json:"enabled,omitempty"`
+	Commands         map[string]bool                 `json:"commands,omitempty"`
+	Events           map[string]bool                 `json:"events,omitempty"`
+	CommandPrefix    *string                         `json:"prefix,omitempty"`
+	EnableSleep      *bool                           `json:"enable_sleep,omitempty"`
+	SleepTimeout     *int                            `json:"sleep_timeout,omitempty"`
+	Access           *config.AccessControl           `json:"access,omitempty"`
+	CommandAccess    map[string]config.AccessControl `json:"command_access,omitempty"`
+	EventAccess      map[string]config.AccessControl `json:"event_access,omitempty"`
+	CommandOverrides map[string][]config.Override    `json:"command_overrides,omitempty"`
 }
 
 type pluginStateView struct {
-	Enabled       bool                            `json:"enabled"`
-	Commands      map[string]bool                 `json:"commands"`
-	Events        map[string]bool                 `json:"events"`
-	CommandPrefix string                          `json:"command_prefix"`
-	EnableSleep   bool                            `json:"enable_sleep"`
-	SleepTimeout  int                             `json:"sleep_timeout"`
-	Status        string                          `json:"status"`
-	Access        config.AccessControl            `json:"access"`
-	CommandAccess map[string]config.AccessControl `json:"command_access"`
-	EventAccess   map[string]config.AccessControl `json:"event_access"`
+	Enabled          bool                            `json:"enabled"`
+	Commands         map[string]bool                 `json:"commands"`
+	Events           map[string]bool                 `json:"events"`
+	CommandPrefix    string                          `json:"command_prefix"`
+	EnableSleep      bool                            `json:"enable_sleep"`
+	SleepTimeout     int                             `json:"sleep_timeout"`
+	Status           string                          `json:"status"`
+	Access           config.AccessControl            `json:"access"`
+	CommandAccess    map[string]config.AccessControl `json:"command_access"`
+	EventAccess      map[string]config.AccessControl `json:"event_access"`
+	CommandOverrides map[string][]config.Override    `json:"command_overrides"`
 }
 
 type pluginListItem struct {
@@ -153,6 +157,7 @@ func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppCon
 		state.Access = control.Access
 		state.CommandAccess = control.CommandAccess
 		state.EventAccess = control.EventAccess
+		state.CommandOverrides = control.CommandOverrides
 		if control.EnableSleep != nil {
 			state.EnableSleep = *control.EnableSleep
 		} else {
@@ -226,6 +231,9 @@ func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatc
 	}
 	if patch.EventAccess != nil {
 		control.EventAccess = patch.EventAccess
+	}
+	if patch.CommandOverrides != nil {
+		control.CommandOverrides = patch.CommandOverrides
 	}
 	return control
 }
@@ -488,7 +496,64 @@ func (s *Server) handlePluginSubAPI(w http.ResponseWriter, r *http.Request) {
 		s.handlePluginSwitchesAPI(w, r, parts[0])
 		return
 	}
+	if len(parts) == 2 && parts[1] == "test-override" {
+		s.handleTestOverrideAPI(w, r, parts[0])
+		return
+	}
 	w.WriteHeader(http.StatusNotFound)
+}
+
+func (s *Server) handleTestOverrideAPI(w http.ResponseWriter, r *http.Request, _ string) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+
+	var req struct {
+		Input     string                   `json:"input"`
+		Overrides []util.Override          `json:"overrides"`
+		Commands  []plugin.CommandListener `json:"commands"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+
+	// 1. Apply overrides
+	result := util.ApplyOverrides(req.Input, req.Overrides)
+
+	// 2. Check if the result matches any command
+	var matchInfo any
+	for _, cmd := range req.Commands {
+		re, err := regexp.Compile(cmd.Pattern)
+		if err != nil {
+			continue
+		}
+		match := re.FindStringSubmatch(result)
+		if match == nil {
+			continue
+		}
+
+		groups := make(map[string]string)
+		groupNames := re.SubexpNames()
+		for i, name := range groupNames {
+			if i != 0 && name != "" && i < len(match) {
+				groups[name] = match[i]
+			}
+		}
+
+		matchInfo = map[string]any{
+			"command_id":   cmd.ID,
+			"command_name": cmd.Name,
+			"groups":       groups,
+		}
+		break
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"result":     result,
+		"match_info": matchInfo,
+	})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

@@ -120,6 +120,7 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     access: state?.access,
     command_access: state?.command_access,
     event_access: state?.event_access,
+    command_overrides: state?.command_overrides ?? {},
   };
 }
 

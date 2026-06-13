@@ -60,17 +60,17 @@ func (p *mockPlugin) Exited() <-chan struct{} {
 
 func TestLazyPluginLifecycle(t *testing.T) {
 	pm := papi.NewManager()
-	host := New(pm, nil, nil, nil, nil, nil)
+	host := New(pm, nil, nil, nil, nil, nil, nil)
 
 	mock := &mockPlugin{exited: make(chan struct{})}
-	
+
 	host.starter = func(ctx context.Context, exePath string) (*loadedCandidate, error) {
 		mock.startCount.Add(1)
 		mock.killed.Store(false)
 		mock.exited = make(chan struct{})
-		
+
 		serverConn, clientConn := net.Pipe()
-		
+
 		srv := rpc.NewServer()
 		if err := srv.RegisterName("Plugin", &transport.PluginRPCServer{Impl: mock}); err != nil {
 			return nil, err
@@ -138,8 +138,8 @@ func TestLazyPluginLifecycle(t *testing.T) {
 
 	// 5. Verify status reporting
 	status, _ := lazy.Status(ctx)
-	if status != "OK" {
-		t.Errorf("Expected status OK, got %s", status)
+	if status != "Idle" {
+		t.Errorf("Expected status Idle, got %s", status)
 	}
 
 	time.Sleep(idleTimeout * 2)

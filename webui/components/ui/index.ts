@@ -5,3 +5,4 @@ export * from "@/components/ui/input";
 export * from "@/components/ui/status-message";
 export * from "@/components/ui/textarea";
 export * from "@/components/ui/access-control-panel";
+export * from "@/components/ui/override-panel";

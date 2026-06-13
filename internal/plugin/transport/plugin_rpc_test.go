@@ -46,6 +46,11 @@ func (p *rpcStubPlugin) Handle(ctx context.Context, listenerID string, eventRaw 
 	return papi.HandleResult{}, nil
 }
 
+func (p *rpcStubPlugin) Status(ctx context.Context) (string, error) {
+	_ = ctx
+	return "OK", nil
+}
+
 func (p *rpcStubPlugin) Shutdown(ctx context.Context) error {
 	_ = ctx
 	return nil

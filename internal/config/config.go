@@ -34,8 +34,8 @@ type AppConfig struct {
 	// PluginControls stores host-side runtime switches for plugins and listeners.
 	PluginControls map[string]PluginControl `json:"plugin_controls,omitempty"`
 	// GlobalAccess controls access across all plugins and commands.
-	GlobalAccess AccessControl `json:"global_access,omitempty"`
-	ChatLog      ChatLogConfig `json:"chat_log"`
+	GlobalAccess AccessControl    `json:"global_access,omitempty"`
+	ChatLog      ChatLogConfig    `json:"chat_log"`
 	TriggerLog   TriggerLogConfig `json:"trigger_log"`
 	// MessageDedup enables message deduplication based on group_id + message_seq.
 	// Only applies to group messages. Defaults to true.
@@ -103,6 +103,12 @@ func (ac AccessControl) IsEmpty() bool {
 		len(ac.WhiteListGroups) == 0 && len(ac.BlackListGroups) == 0
 }
 
+// Override defines a regex-based replacement for command input.
+type Override struct {
+	Pattern     string `json:"pattern"`
+	Replacement string `json:"replacement"`
+}
+
 // PluginControl stores host-side enable/disable state.
 type PluginControl struct {
 	Disabled         bool                     `json:"disabled,omitempty"`
@@ -112,6 +118,8 @@ type PluginControl struct {
 	Access           AccessControl            `json:"access,omitempty"`
 	CommandAccess    map[string]AccessControl `json:"command_access,omitempty"`
 	EventAccess      map[string]AccessControl `json:"event_access,omitempty"`
+	// CommandOverrides allows redefining input for specific commands.
+	CommandOverrides map[string][]Override `json:"command_overrides,omitempty"`
 	// CommandPrefix overrides AppConfig.MessagePrefix for this plugin.
 	CommandPrefix string `json:"command_prefix,omitempty"`
 	// EnableSleep nil=use global, true/false=override
@@ -125,6 +133,9 @@ func (pc PluginControl) IsEmpty() bool {
 		return false
 	}
 	if !pc.Access.IsEmpty() || len(pc.CommandAccess) > 0 || len(pc.EventAccess) > 0 {
+		return false
+	}
+	if len(pc.CommandOverrides) > 0 {
 		return false
 	}
 	if pc.CommandPrefix != "" || (pc.EnableSleep != nil && !*pc.EnableSleep) || (pc.SleepTimeout != 0 && pc.SleepTimeout != 60) {
@@ -179,28 +190,28 @@ func Default() AppConfig {
 				ListenAddr: defaultReverseWSListen,
 			},
 		},
-	WebUI: WebUIConfig{
-		ListenAddr:      "0.0.0.0:3000",
-		AutoRefresh:     &[]bool{true}[0],
-		RefreshInterval: 1,
-	},
-	MessagePrefix:  defaultMessagePrefix,
-	Globals:        make(map[string]string),
-	Plugins:        make(map[string]json.RawMessage),
-	PluginControls: make(map[string]PluginControl),
-	ChatLog:        ChatLogConfig{DatabaseURI: ""},
-	TriggerLog: TriggerLogConfig{
-		Enabled:       false,
-		DatabaseURI:   "",
-		QueueSize:     1000,
-		BatchSize:     100,
-		BatchInterval: "5s",
-	},
-	Dedup: DedupConfig{
-		Enabled:    true,
-		Backend:    "memory",
-		TTLSeconds: 3600,
-	},
+		WebUI: WebUIConfig{
+			ListenAddr:      "0.0.0.0:3000",
+			AutoRefresh:     &[]bool{true}[0],
+			RefreshInterval: 1,
+		},
+		MessagePrefix:  defaultMessagePrefix,
+		Globals:        make(map[string]string),
+		Plugins:        make(map[string]json.RawMessage),
+		PluginControls: make(map[string]PluginControl),
+		ChatLog:        ChatLogConfig{DatabaseURI: ""},
+		TriggerLog: TriggerLogConfig{
+			Enabled:       false,
+			DatabaseURI:   "",
+			QueueSize:     1000,
+			BatchSize:     100,
+			BatchInterval: "5s",
+		},
+		Dedup: DedupConfig{
+			Enabled:    true,
+			Backend:    "memory",
+			TTLSeconds: 3600,
+		},
 	}
 }
 
@@ -526,6 +537,27 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 			}
 			control.EventAccess = newEA
 		}
+		if control.CommandOverrides != nil {
+			newCO := make(map[string][]Override, len(control.CommandOverrides))
+			for k, v := range control.CommandOverrides {
+				k = strings.TrimSpace(k)
+				if k == "" {
+					continue
+				}
+				normalizedRules := make([]Override, 0, len(v))
+				for _, rule := range v {
+					rule.Pattern = strings.TrimSpace(rule.Pattern)
+					rule.Replacement = strings.TrimSpace(rule.Replacement)
+					if rule.Pattern != "" {
+						normalizedRules = append(normalizedRules, rule)
+					}
+				}
+				if len(normalizedRules) > 0 {
+					newCO[k] = normalizedRules
+				}
+			}
+			control.CommandOverrides = newCO
+		}
 		if control.EnableSleep == nil {
 			sleep := true
 			control.EnableSleep = &sleep
@@ -632,6 +664,20 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 		}
 		if !accessControlMapEqual(leftControl.EventAccess, rightControl.EventAccess) {
 			return false
+		}
+		if len(leftControl.CommandOverrides) != len(rightControl.CommandOverrides) {
+			return false
+		}
+		for k, leftRules := range leftControl.CommandOverrides {
+			rightRules, ok := rightControl.CommandOverrides[k]
+			if !ok || len(leftRules) != len(rightRules) {
+				return false
+			}
+			for i := range leftRules {
+				if leftRules[i].Pattern != rightRules[i].Pattern || leftRules[i].Replacement != rightRules[i].Replacement {
+					return false
+				}
+			}
 		}
 	}
 	return true

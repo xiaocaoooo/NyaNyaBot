@@ -16,9 +16,10 @@ import (
 )
 
 type recordingPlugin struct {
-	desc        plugin.Descriptor
-	handled     []string
-	receivedRaw []ob11.Event
+	desc            plugin.Descriptor
+	handled         []string
+	receivedRaw     []ob11.Event
+	receivedMatches []*plugin.CommandMatch
 }
 
 func (p *recordingPlugin) Descriptor(ctx context.Context) (plugin.Descriptor, error) {
@@ -42,9 +43,9 @@ func (p *recordingPlugin) Invoke(ctx context.Context, method string, paramsJSON 
 
 func (p *recordingPlugin) Handle(ctx context.Context, listenerID string, eventRaw ob11.Event, match *plugin.CommandMatch) (plugin.HandleResult, error) {
 	_ = ctx
-	_ = match
 	p.handled = append(p.handled, listenerID)
 	p.receivedRaw = append(p.receivedRaw, eventRaw)
+	p.receivedMatches = append(p.receivedMatches, match)
 	return plugin.HandleResult{}, nil
 }
 
@@ -210,6 +211,36 @@ func TestDispatchMatchesCommandWithPrefix(t *testing.T) {
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
 		t.Fatalf("expected command with prefix to match, got %#v", p.handled)
+	}
+}
+
+func TestDispatchAppliesGlobalAndCommandOverridesInOrder(t *testing.T) {
+	p := &recordingPlugin{desc: plugin.Descriptor{
+		PluginID: "external.commands",
+		Commands: []plugin.CommandListener{{ID: "cmd.alias", Pattern: `^正式 (.+)$`}},
+	}}
+	disp := newTestDispatcher(t, config.AppConfig{
+		MessagePrefix: `^/(?P<content>.+)$`,
+		PluginControls: map[string]config.PluginControl{
+			"external.commands": {
+				CommandOverrides: map[string][]config.Override{
+					"global":    {{Pattern: `^别名 (.+)$`, Replacement: `中间 $1`}},
+					"cmd.alias": {{Pattern: `^中间 (.+)$`, Replacement: `正式 $1`}},
+				},
+			},
+		},
+	}, p)
+
+	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/别名 参数","message":"/别名 参数"}`))
+
+	if !reflect.DeepEqual(p.handled, []string{"cmd.alias"}) {
+		t.Fatalf("expected override-transformed command to match, got %#v", p.handled)
+	}
+	if len(p.receivedMatches) != 1 || p.receivedMatches[0] == nil {
+		t.Fatalf("expected one command match, got %#v", p.receivedMatches)
+	}
+	if !reflect.DeepEqual(p.receivedMatches[0].Groups, []string{"参数"}) {
+		t.Fatalf("expected command-specific override to run after global override, got match %#v", p.receivedMatches[0])
 	}
 }
 

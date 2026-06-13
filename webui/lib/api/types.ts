@@ -5,6 +5,11 @@ export interface AccessControl {
   blacklist_groups?: number[];
 }
 
+export interface Override {
+  pattern: string;
+  replacement: string;
+}
+
 export interface AppConfig {
   onebot: {
     reverse_ws: {
@@ -125,6 +130,7 @@ export interface PluginStateView {
   access?: AccessControl;
   command_access?: Record<string, AccessControl>;
   event_access?: Record<string, AccessControl>;
+  command_overrides?: Record<string, Override[]>;
 }
 
 export interface PluginListItem extends PluginDescriptor {
@@ -160,6 +166,7 @@ export interface UpdatePluginSwitchesPayload {
   access?: AccessControl;
   command_access?: Record<string, AccessControl>;
   event_access?: Record<string, AccessControl>;
+  command_overrides?: Record<string, Override[]>;
 }
 
 export interface UpdatePluginSwitchesResponse {

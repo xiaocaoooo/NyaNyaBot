@@ -16,6 +16,7 @@ import (
 	"github.com/xiaocaoooo/nyanyabot/internal/plugin/transport"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 	"github.com/xiaocaoooo/nyanyabot/internal/triggerlog"
+	"github.com/xiaocaoooo/nyanyabot/internal/util"
 )
 
 // TraceProvider 提供追踪功能的接口
@@ -222,15 +223,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 
 					pluginTraceID = d.triggerRecorder.BeginPluginTrace(
 						ctx,
-						pid,         // pluginID
-						l.ID,        // listenerID
-						"event",     // listenerType
-						groupIDInt,  // groupID
-						userIDInt,   // userID
-						selfID,      // selfID
+						pid,          // pluginID
+						l.ID,         // listenerID
+						"event",      // listenerType
+						groupIDInt,   // groupID
+						userIDInt,    // userID
+						selfID,       // selfID
 						messageIDInt, // messageID
-						messageSeq,  // messageSeq
-						triggerData, // triggerData
+						messageSeq,   // messageSeq
+						triggerData,  // triggerData
 					)
 				}
 
@@ -391,6 +392,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			input = strippedInput
+			// Apply plugin-wide overrides before command-specific overrides.
+			if control, ok := cfg.PluginControls[pid]; ok && control.CommandOverrides != nil {
+				input = applyConfiguredOverrides(input, control.CommandOverrides["global"])
+				input = applyConfiguredOverrides(input, control.CommandOverrides[c.ID])
+			}
 			d.logger.Info("[dispatch] trying command",
 				"plugin_id", pid,
 				"command_id", c.ID,
@@ -547,6 +553,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			}
 		}
 	}
+}
+
+func applyConfiguredOverrides(input string, rules []config.Override) string {
+	if len(rules) == 0 {
+		return input
+	}
+	utilOverrides := make([]util.Override, len(rules))
+	for i, rule := range rules {
+		utilOverrides[i] = util.Override{Pattern: rule.Pattern, Replacement: rule.Replacement}
+	}
+	return util.ApplyOverrides(input, utilOverrides)
 }
 
 func computeEventKeys(raw ob11.Event) (key string, full string) {

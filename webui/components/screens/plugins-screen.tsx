@@ -11,6 +11,7 @@ import { AppInput } from "@/components/ui/input";
 import { StatusMessage } from "@/components/ui/status-message";
 import { AppTextarea } from "@/components/ui/textarea";
 import { AccessControlPanel } from "@/components/ui/access-control-panel";
+import { OverridePanel } from "@/components/ui/override-panel";
 import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 import { apiClient } from "@/lib/api/client";
 import type { PluginListItem, AccessControl } from "@/lib/api/types";
@@ -456,17 +457,22 @@ export function PluginsScreen() {
   const [sleepTimeout, setSleepTimeout] = useState<string>("60");
 
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
+  const { isOpen: isOverrideOpen, onOpen: onOverrideOpen, onOpenChange: onOverrideOpenChange } = useDisclosure();
+  const [acTarget, setAcTarget] = useState<{ type: 'plugin' | 'command' | 'event', id?: string }>({ type: 'plugin' });
+  const [ovTarget, setOvTarget] = useState<{ type: 'plugin' | 'command', id?: string }>({ type: 'plugin' });
   const [acTitle, setAcTitle] = useState("");
+  const [ovTitle, setOvTitle] = useState("");
   const [acWhitelistUsers, setAcWhitelistUsers] = useState("");
   const [acBlacklistUsers, setAcBlacklistUsers] = useState("");
   const [acWhitelistGroups, setAcWhitelistGroups] = useState("");
   const [acBlacklistGroups, setAcBlacklistGroups] = useState("");
-  const [acTarget, setAcTarget] = useState<{ type: 'plugin' | 'command' | 'event', id?: string }>({ type: 'plugin' });
 
   const [loading, setLoading] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingSwitches, setSavingSwitches] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+
 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -537,6 +543,11 @@ export function PluginsScreen() {
       const currentConfig = normalizeConfigObject(response.config);
       const mergedConfig = deepMerge(defaults, currentConfig);
 
+      if (isDirty && pluginId === selectedPluginId) {
+        console.log('⚠️ Config is dirty, skipping auto-update to prevent data loss');
+        return;
+      }
+
       setSchemaConfig(mergedConfig);
       setPluginConfigText(formatJSON(mergedConfig));
       setEditorMode(canUseSchemaEditor ? "schema" : "json");
@@ -547,9 +558,10 @@ export function PluginsScreen() {
     } finally {
       setLoadingConfig(false);
     }
-  }, [canUseSchemaEditor, t]);
+  }, [canUseSchemaEditor, t, isDirty, selectedPluginId]);
 
   useEffect(() => {
+    setIsDirty(false);
     if (!selectedPluginConfig) {
       setSchemaConfig({});
       setPluginConfigText("{}");
@@ -576,8 +588,10 @@ export function PluginsScreen() {
         const response = await apiClient.updatePluginSwitches(pluginId, payload);
         updateLocalPluginState(pluginId, response.state);
         setSwitchStatus(t("plugins.switchStatusSaved"));
+        return true;
       } catch (err) {
         setSwitchError(err instanceof Error ? err.message : t("plugins.switchErrorSave"));
+        return false;
       } finally {
         setSavingSwitches(false);
       }
@@ -617,6 +631,18 @@ export function PluginsScreen() {
     onOpen();
   }, [selectedPlugin, t, onOpen]);
 
+  const openOverride = useCallback((type: 'plugin' | 'command', id?: string, name?: string) => {
+    if (!selectedPlugin) return;
+    setOvTarget({ type, id });
+
+    if (type === 'plugin') {
+      setOvTitle(`${t("plugins.overrideTitle")}: ${selectedPlugin.name}`);
+    } else if (type === 'command' && id) {
+      setOvTitle(`${t("plugins.commandOverrideTitle")}: ${name || id}`);
+    }
+    onOverrideOpen();
+  }, [selectedPlugin, t, onOverrideOpen]);
+
   const saveAccessControl = async () => {
     if (!selectedPlugin) return;
 
@@ -636,8 +662,10 @@ export function PluginsScreen() {
       payload.event_access = { [acTarget.id]: ac };
     }
 
-    await savePluginSwitches(selectedPlugin.plugin_id, payload);
-    onOpenChange(); // Close modal
+    const saved = await savePluginSwitches(selectedPlugin.plugin_id, payload);
+    if (saved) {
+      onOpenChange(); // Close modal
+    }
   };
 
   const handlePluginToggle = useCallback(
@@ -705,6 +733,7 @@ export function PluginsScreen() {
   };
 
   const handleSchemaFieldChange = (path: string[], nextValue: unknown) => {
+    setIsDirty(true);
     setSchemaConfig((current) => {
       const updated = setValueAtPath(current, path, nextValue);
       setPluginConfigText(formatJSON(updated));
@@ -747,6 +776,7 @@ export function PluginsScreen() {
 
       setSchemaConfig(parsedConfig);
       setPluginConfigText(formatJSON(parsedConfig));
+      setIsDirty(false);
       setStatus(t("plugins.statusSaved"));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("plugins.errorSaveConfig"));
@@ -754,6 +784,7 @@ export function PluginsScreen() {
       setSavingConfig(false);
     }
   };
+
 
   return (
     <section className="space-y-6">
@@ -763,7 +794,10 @@ export function PluginsScreen() {
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
-        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={() => loadPlugins()}>
+        <AppButton startContent={<RefreshCw className="h-4 w-4" />} tone="neutral" onPress={() => {
+          setIsDirty(false);
+          loadPlugins();
+        }}>
           {t("plugins.refresh")}
         </AppButton>
         {status ? <StatusMessage tone="success">{status}</StatusMessage> : null}
@@ -931,7 +965,15 @@ export function PluginsScreen() {
                             onValueChange={handlePluginToggle}
                           />
                         </div>
-                        <div className="mt-3 flex items-center justify-end">
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <AppButton
+                            size="sm"
+                            startContent={<RotateCcw className="h-4 w-4" />}
+                            tone="ghost"
+                            onPress={() => openOverride('plugin')}
+                          >
+                            {t("plugins.overrideTitle")}
+                          </AppButton>
                           <AppButton
                             size="sm"
                             startContent={<Shield className="h-4 w-4" />}
@@ -1056,6 +1098,14 @@ export function PluginsScreen() {
                                       <Chip radius="sm" size="sm" variant="flat">
                                         {commandEnabled ? t("plugins.schemaEnabled") : t("plugins.schemaDisabled")}
                                       </Chip>
+                                      <AppButton
+                                        isIconOnly
+                                        size="sm"
+                                        tone="ghost"
+                                        onPress={() => openOverride('command', command.id, command.name)}
+                                      >
+                                        <RotateCcw className="h-4 w-4" />
+                                      </AppButton>
                                       <AppButton
                                         isIconOnly
                                         size="sm"
@@ -1263,6 +1313,7 @@ export function PluginsScreen() {
                               value={pluginConfigText}
                               onValueChange={(next) => {
                                 setPluginConfigText(next);
+                                setIsDirty(true);
                                 if (editorMode !== "json") {
                                   return;
                                 }
@@ -1375,6 +1426,47 @@ export function PluginsScreen() {
                   onPress={saveAccessControl}
                 >
                   {t("plugins.saveAccessControl")}
+                </AppButton>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isOverrideOpen} onOpenChange={onOverrideOpenChange} size="3xl" scrollBehavior="inside">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex items-center gap-2 border-b border-border/50 pb-4">
+                <RotateCcw className="h-5 w-5 text-primary" />
+                <div className="flex flex-col">
+                  <span className="text-lg font-bold">{ovTitle}</span>
+                  <span className="text-xs font-normal text-muted">
+                    {ovTarget.type === 'plugin' 
+                      ? t("plugins.pluginOverrideDesc") 
+                      : t("plugins.commandOverrideDesc")}
+                  </span>
+                </div>
+              </ModalHeader>
+              <ModalBody className="py-6">
+                <OverridePanel 
+                  selectedPlugin={selectedPlugin}
+                  target={ovTarget}
+                  saving={savingSwitches}
+                  onSave={async (overrides) => {
+                    const payload: Parameters<typeof apiClient.updatePluginSwitches>[1] = {
+                      command_overrides: overrides
+                    };
+                    const saved = await savePluginSwitches(selectedPlugin!.plugin_id, payload);
+                    if (saved) {
+                      onOverrideOpenChange();
+                    }
+                  }}
+                />
+              </ModalBody>
+              <ModalFooter className="border-t border-border/50 pt-4">
+                <AppButton tone="neutral" onPress={onClose}>
+                  {t("plugins.hideDetails")}
                 </AppButton>
               </ModalFooter>
             </>
