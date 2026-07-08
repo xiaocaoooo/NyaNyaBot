@@ -26,8 +26,8 @@ RUN go mod download
 COPY . .
 
 # Copy the built frontend assets from the frontend-builder stage
-RUN mkdir -p internal/web/frontend && cp -R /app/webui/out/. internal/web/frontend/
-# Note: we use a separate COPY or RUN to ensure the directory exists for //go:embed
+COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
+
 
 # Build the main application
 RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
