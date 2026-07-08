@@ -1,0 +1,11 @@
+services:
+  nyanyabot:
+    build: .
+    container_name: nyanyabot
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./plugins:/app/plugins
+    restart: unless-stopped
