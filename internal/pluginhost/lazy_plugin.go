@@ -3,6 +3,7 @@ package pluginhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -125,7 +126,7 @@ func (p *LazyPlugin) EnsureStarted(ctx context.Context) error {
 
 	// Release lock during I/O
 	p.mu.Unlock()
-	candidate, err := p.host.startExecutable(ctx, exePath)
+	candidate, err := p.host.startExecutable(ctx, exePath, pluginID)
 	p.mu.Lock()
 
 	if err != nil {
@@ -319,4 +320,26 @@ func (p *LazyPlugin) Status(ctx context.Context) (string, error) {
 	}
 
 	return "Running", nil
+}
+
+// Restart stops a running process and starts it again with the latest environment.
+// If the plugin is already sleeping (no process), this is a no-op.
+func (p *LazyPlugin) Restart(ctx context.Context) error {
+	if p == nil {
+		return errors.New("lazy plugin is nil")
+	}
+
+	p.mu.Lock()
+	wasRunning := p.rpcClient != nil || p.client != nil
+	if err := p.stopLocked(ctx); err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	p.crashed.Store(false)
+	p.mu.Unlock()
+
+	if !wasRunning {
+		return nil
+	}
+	return p.EnsureStarted(ctx)
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -400,5 +401,87 @@ func TestAppConfigIsAllowed(t *testing.T) {
 				t.Errorf("AppConfig.IsAllowed() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPluginControlIsEmptyWithEnv(t *testing.T) {
+	control := PluginControl{
+		Env: map[string]string{"FOO": "bar"},
+	}
+	if control.IsEmpty() {
+		t.Fatal("expected plugin control with env to be non-empty")
+	}
+}
+
+func TestNormalizeStringMapDropsEmptyKeysKeepsEmptyValues(t *testing.T) {
+	in := map[string]string{
+		"  FOO  ": "bar",
+		"":        "drop",
+		"   ":     "drop2",
+		"EMPTY":   "",
+	}
+	got := NormalizeStringMap(in)
+	want := map[string]string{
+		"FOO":   "bar",
+		"EMPTY": "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeStringMap() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMergeProcessEnvOverrideOrder(t *testing.T) {
+	host := []string{"HOST_ONLY=1", "SHARED=host", "ALSO=host"}
+	global := map[string]string{"SHARED": "global", "GLOBAL_ONLY": "g", "ALSO": "global"}
+	plugin := map[string]string{"SHARED": "plugin", "PLUGIN_ONLY": "p", "EMPTY": ""}
+
+	got := MergeProcessEnv(host, global, plugin)
+	env := map[string]string{}
+	for _, e := range got {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok {
+			t.Fatalf("invalid env entry %q", e)
+		}
+		env[k] = v
+	}
+
+	checks := map[string]string{
+		"HOST_ONLY":   "1",
+		"SHARED":      "plugin",
+		"ALSO":        "global",
+		"GLOBAL_ONLY": "g",
+		"PLUGIN_ONLY": "p",
+		"EMPTY":       "",
+	}
+	for k, want := range checks {
+		if env[k] != want {
+			t.Errorf("env[%q]=%q, want %q", k, env[k], want)
+		}
+	}
+}
+
+func TestValidateEnvKey(t *testing.T) {
+	if err := ValidateEnvKey("FOO"); err != nil {
+		t.Fatalf("valid key rejected: %v", err)
+	}
+	if err := ValidateEnvKey("  "); err == nil {
+		t.Fatal("expected empty key error")
+	}
+	if err := ValidateEnvKey("A=B"); err == nil {
+		t.Fatal("expected '=' key error")
+	}
+}
+
+func TestLoadOrCreateDefaultInitializesPluginEnv(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	cfg, err := store.LoadOrCreateDefault()
+	if err != nil {
+		t.Fatalf("load or create default: %v", err)
+	}
+	if cfg.PluginEnv == nil {
+		t.Fatal("expected PluginEnv to be initialized")
 	}
 }

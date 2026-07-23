@@ -32,6 +32,7 @@ export interface AppConfig {
     batch_interval: string;
   };
   globals?: Record<string, string>;
+  plugin_env?: Record<string, string>;
   plugins?: Record<string, unknown>;
   message_prefix?: string;
   global_sleep_timeout?: number;
@@ -131,6 +132,7 @@ export interface PluginStateView {
   command_access?: Record<string, AccessControl>;
   event_access?: Record<string, AccessControl>;
   command_overrides?: Record<string, Override[]>;
+  env?: Record<string, string>;
 }
 
 export interface PluginListItem extends PluginDescriptor {
@@ -141,6 +143,10 @@ export interface GlobalsResponse {
   globals: Record<string, string>;
 }
 
+export interface PluginEnvResponse {
+  plugin_env: Record<string, string>;
+}
+
 export interface PluginConfigResponse {
   plugin_id: string;
   config: Record<string, unknown>;
@@ -148,6 +154,10 @@ export interface PluginConfigResponse {
 
 export interface UpdateGlobalsPayload {
   globals: Record<string, string>;
+}
+
+export interface UpdatePluginEnvPayload {
+  plugin_env: Record<string, string>;
 }
 
 export interface UpdatePluginConfigPayload {
@@ -167,6 +177,7 @@ export interface UpdatePluginSwitchesPayload {
   command_access?: Record<string, AccessControl>;
   event_access?: Record<string, AccessControl>;
   command_overrides?: Record<string, Override[]>;
+  env?: Record<string, string>;
 }
 
 export interface UpdatePluginSwitchesResponse {

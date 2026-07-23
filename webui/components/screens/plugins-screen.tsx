@@ -1,7 +1,7 @@
 "use client";
 
 import { Chip, Divider, Spinner, Switch, Tab, Tabs, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
-import { RefreshCw, Save, Shield, RotateCcw } from "lucide-react";
+import { Plus, RefreshCw, Save, Shield, RotateCcw, Trash2 } from "lucide-react";
 import { type Key, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppButton } from "@/components/ui/button";
@@ -455,6 +455,9 @@ export function PluginsScreen() {
   const [pluginPrefix, setPluginPrefix] = useState<string>("");
   const [enableSleep, setEnableSleep] = useState<boolean>(true);
   const [sleepTimeout, setSleepTimeout] = useState<string>("60");
+  const [envRows, setEnvRows] = useState<Array<{ id: string; key: string; value: string }>>([
+    { id: Math.random().toString(36).slice(2), key: "", value: "" },
+  ]);
 
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
   const { isOpen: isOverrideOpen, onOpen: onOverrideOpen, onOpenChange: onOverrideOpenChange } = useDisclosure();
@@ -498,10 +501,17 @@ export function PluginsScreen() {
       setPluginPrefix(selectedPlugin.state.command_prefix ?? "");
       setEnableSleep(selectedPlugin.state.enable_sleep ?? true);
       setSleepTimeout(String(selectedPlugin.state.sleep_timeout ?? 60));
+      const rows = Object.entries(selectedPlugin.state.env ?? {}).map(([key, value]) => ({
+        id: Math.random().toString(36).slice(2),
+        key,
+        value,
+      }));
+      setEnvRows(rows.length > 0 ? rows : [{ id: Math.random().toString(36).slice(2), key: "", value: "" }]);
     } else {
       setPluginPrefix("");
       setEnableSleep(true);
       setSleepTimeout("60");
+      setEnvRows([{ id: Math.random().toString(36).slice(2), key: "", value: "" }]);
     }
   }, [selectedPlugin]);
 
@@ -1058,6 +1068,80 @@ export function PluginsScreen() {
                                 enable_sleep: enableSleep,
                                 sleep_timeout: timeout,
                               });
+                            }}
+                          >
+                            {t("plugins.saveConfig")}
+                          </AppButton>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border/70 bg-surface-elevated/50 p-3 sm:col-span-2">
+                        <p className="text-sm font-medium text-text">{t("plugins.envLabel")}</p>
+                        <p className="text-xs text-muted mb-2">{t("plugins.envDesc")}</p>
+                        <div className="space-y-2">
+                          {envRows.map((row, index) => (
+                            <div key={row.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                              <AppInput
+                                aria-label={t("plugins.envKeyAria", { index: index + 1 })}
+                                placeholder={t("plugins.envKeyPlaceholder")}
+                                value={row.key}
+                                onValueChange={(value) =>
+                                  setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: value } : r)))
+                                }
+                              />
+                              <AppInput
+                                aria-label={t("plugins.envValueAria", { index: index + 1 })}
+                                placeholder={t("plugins.envValuePlaceholder")}
+                                value={row.value}
+                                onValueChange={(value) =>
+                                  setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, value } : r)))
+                                }
+                              />
+                              <AppButton
+                                aria-label={t("plugins.envDeleteAria", { index: index + 1 })}
+                                isIconOnly
+                                size="sm"
+                                tone="ghost"
+                                onPress={() =>
+                                  setEnvRows((rows) => {
+                                    const next = rows.filter((r) => r.id !== row.id);
+                                    return next.length === 0
+                                      ? [{ id: Math.random().toString(36).slice(2), key: "", value: "" }]
+                                      : next;
+                                  })
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </AppButton>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <AppButton
+                            size="sm"
+                            startContent={<Plus className="h-4 w-4" />}
+                            tone="neutral"
+                            onPress={() =>
+                              setEnvRows((rows) => [
+                                ...rows,
+                                { id: Math.random().toString(36).slice(2), key: "", value: "" },
+                              ])
+                            }
+                          >
+                            {t("plugins.envAdd")}
+                          </AppButton>
+                          <AppButton
+                            size="sm"
+                            isDisabled={savingSwitches}
+                            onPress={async () => {
+                              if (!selectedPlugin) return;
+                              const env: Record<string, string> = {};
+                              for (const row of envRows) {
+                                const key = row.key.trim();
+                                if (!key) continue;
+                                env[key] = row.value;
+                              }
+                              await savePluginSwitches(selectedPlugin.plugin_id, { env });
                             }}
                           >
                             {t("plugins.saveConfig")}

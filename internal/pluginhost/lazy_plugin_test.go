@@ -64,7 +64,8 @@ func TestLazyPluginLifecycle(t *testing.T) {
 
 	mock := &mockPlugin{exited: make(chan struct{})}
 
-	host.starter = func(ctx context.Context, exePath string) (*loadedCandidate, error) {
+	host.starter = func(ctx context.Context, exePath string, pluginID string) (*loadedCandidate, error) {
+		_ = pluginID
 		mock.startCount.Add(1)
 		mock.killed.Store(false)
 		mock.exited = make(chan struct{})
