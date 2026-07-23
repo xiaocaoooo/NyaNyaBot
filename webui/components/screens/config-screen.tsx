@@ -39,6 +39,7 @@ export function ConfigScreen() {
   const [messagePrefix, setMessagePrefix] = useState("");
   const [globalSleepTimeout, setGlobalSleepTimeout] = useState("60");
   const [globalsRows, setGlobalsRows] = useState<GlobalRow[]>([createRow()]);
+  const [pluginEnvRows, setPluginEnvRows] = useState<GlobalRow[]>([createRow()]);
 
   // Trigger log config states
   const [triggerLogEnabled, setTriggerLogEnabled] = useState(false);
@@ -56,6 +57,7 @@ export function ConfigScreen() {
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingGlobals, setSavingGlobals] = useState(false);
+  const [savingPluginEnv, setSavingPluginEnv] = useState(false);
   const [savingPrefix, setSavingPrefix] = useState(false);
   const [savingTriggerLog, setSavingTriggerLog] = useState(false);
   const [savingAccessControl, setSavingAccessControl] = useState(false);
@@ -68,7 +70,11 @@ export function ConfigScreen() {
     setError(null);
 
     try {
-      const [configRes, globalsRes] = await Promise.all([apiClient.fetchConfig(), apiClient.fetchGlobals()]);
+      const [configRes, globalsRes, pluginEnvRes] = await Promise.all([
+        apiClient.fetchConfig(),
+        apiClient.fetchGlobals(),
+        apiClient.fetchPluginEnv(),
+      ]);
       setWebuiAddr(configRes.webui.listen_addr ?? "");
       setAutoRefresh(configRes.webui.auto_refresh ?? true);
       setRefreshInterval(String(configRes.webui.refresh_interval ?? 1));
@@ -95,8 +101,14 @@ export function ConfigScreen() {
         key,
         value,
       }));
-
       setGlobalsRows(rows.length > 0 ? rows : [createRow()]);
+
+      const envRows = Object.entries(pluginEnvRes.plugin_env ?? {}).map(([key, value]) => ({
+        id: Math.random().toString(36).slice(2),
+        key,
+        value,
+      }));
+      setPluginEnvRows(envRows.length > 0 ? envRows : [createRow()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("config.errorLoad"));
     } finally {
@@ -122,12 +134,36 @@ export function ConfigScreen() {
     return map;
   }, [globalsRows]);
 
+  const pluginEnvPayload = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const row of pluginEnvRows) {
+      const key = row.key.trim();
+      if (!key) {
+        continue;
+      }
+      // Keep empty values so users can explicitly clear host/global overrides.
+      map[key] = row.value;
+    }
+    return map;
+  }, [pluginEnvRows]);
+
   const updateGlobalRow = (id: string, patch: Partial<GlobalRow>) => {
     setGlobalsRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
 
   const removeGlobalRow = (id: string) => {
     setGlobalsRows((current) => {
+      const next = current.filter((row) => row.id !== id);
+      return next.length === 0 ? [createRow()] : next;
+    });
+  };
+
+  const updatePluginEnvRow = (id: string, patch: Partial<GlobalRow>) => {
+    setPluginEnvRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+
+  const removePluginEnvRow = (id: string) => {
+    setPluginEnvRows((current) => {
       const next = current.filter((row) => row.id !== id);
       return next.length === 0 ? [createRow()] : next;
     });
@@ -176,6 +212,22 @@ export function ConfigScreen() {
       setError(err instanceof Error ? err.message : t("config.errorSaveGlobals"));
     } finally {
       setSavingGlobals(false);
+    }
+  };
+
+  const savePluginEnv = async () => {
+    setSavingPluginEnv(true);
+    setStatus(null);
+    setError(null);
+
+    try {
+      await apiClient.updatePluginEnv({ plugin_env: pluginEnvPayload });
+      setStatus(t("config.statusSavePluginEnv"));
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("config.errorSavePluginEnv"));
+    } finally {
+      setSavingPluginEnv(false);
     }
   };
 
@@ -591,6 +643,60 @@ export function ConfigScreen() {
               onPress={saveGlobals}
             >
               {t("config.saveGlobals")}
+            </AppButton>
+          </AppCardFooter>
+        </AppCard>
+
+        <AppCard className="lg:col-span-5">
+          <AppCardHeader>
+            <h2 className="text-lg font-semibold text-text">{t("config.pluginEnvTitle")}</h2>
+            <p className="text-sm text-muted">{t("config.pluginEnvDesc")}</p>
+          </AppCardHeader>
+          <AppCardBody>
+            <div className="space-y-3">
+              {pluginEnvRows.map((row, index) => (
+                <div key={row.id} className="grid gap-2 rounded-lg border border-border/70 bg-surface-elevated/50 p-3 sm:grid-cols-[1fr_1fr_auto]">
+                  <AppInput
+                    aria-label={t("config.pluginEnvKeyAria", { index: index + 1 })}
+                    placeholder={t("config.pluginEnvKeyPlaceholder")}
+                    value={row.key}
+                    onValueChange={(value) => updatePluginEnvRow(row.id, { key: value })}
+                  />
+                  <AppInput
+                    aria-label={t("config.pluginEnvValueAria", { index: index + 1 })}
+                    placeholder={t("config.pluginEnvValuePlaceholder")}
+                    value={row.value}
+                    onValueChange={(value) => updatePluginEnvRow(row.id, { value })}
+                  />
+                  <AppButton
+                    aria-label={t("config.pluginEnvDeleteAria", { index: index + 1 })}
+                    isIconOnly
+                    tone="ghost"
+                    onPress={() => removePluginEnvRow(row.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </AppButton>
+                </div>
+              ))}
+            </div>
+
+            <Divider className="my-1 bg-border/70" />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <AppButton startContent={<Plus className="h-4 w-4" />} tone="neutral" onPress={() => setPluginEnvRows((rows) => [...rows, createRow()])}>
+                {t("config.pluginEnvAdd")}
+              </AppButton>
+              <p className="text-xs text-muted">{t("config.pluginEnvCount", { count: Object.keys(pluginEnvPayload).length })}</p>
+            </div>
+          </AppCardBody>
+          <AppCardFooter>
+            <AppButton
+              color="primary"
+              isLoading={savingPluginEnv}
+              startContent={<Save className="h-4 w-4" />}
+              onPress={savePluginEnv}
+            >
+              {t("config.savePluginEnv")}
             </AppButton>
           </AppCardFooter>
         </AppCard>

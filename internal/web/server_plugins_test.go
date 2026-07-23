@@ -247,3 +247,128 @@ func TestHandlePluginSwitchesRejectsUnknownListener(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
+
+func TestHandlePluginEnvGetAndPut(t *testing.T) {
+	handler, store := newPluginTestHandler(t)
+	session := loginTestSession(t, handler, store)
+
+	var restartScopes []string
+	// re-create server with env change hook via store already used
+	s := New(store, plugin.NewManager())
+	s.SetPluginEnvChangeHandler(func(ctx context.Context, scope string, pluginID string) {
+		restartScopes = append(restartScopes, scope+":"+pluginID)
+	})
+	handler = s.Handler()
+	session = loginTestSession(t, handler, store)
+
+	putBody := bytes.NewBufferString(`{"plugin_env":{"HTTP_PROXY":"http://127.0.0.1:7890"," EMPTY ":"","=bad":"x"}}`)
+	// invalid key should fail
+	req := httptest.NewRequest(http.MethodPut, "/api/plugin-env", putBody)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request for invalid env key, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	putBody = bytes.NewBufferString(`{"plugin_env":{"HTTP_PROXY":"http://127.0.0.1:7890","LANG":"C.UTF-8"}}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/plugin-env", putBody)
+	req.AddCookie(session)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put plugin-env expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(restartScopes, []string{"global:"}) {
+		t.Fatalf("expected global restart callback, got %#v", restartScopes)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/plugin-env", nil)
+	req.AddCookie(session)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get plugin-env expected 200, got %d", rec.Code)
+	}
+	var got struct {
+		PluginEnv map[string]string `json:"plugin_env"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.PluginEnv["HTTP_PROXY"] != "http://127.0.0.1:7890" || got.PluginEnv["LANG"] != "C.UTF-8" {
+		t.Fatalf("unexpected plugin_env: %#v", got.PluginEnv)
+	}
+
+	// identical put should not re-trigger restart
+	restartScopes = nil
+	putBody = bytes.NewBufferString(`{"plugin_env":{"HTTP_PROXY":"http://127.0.0.1:7890","LANG":"C.UTF-8"}}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/plugin-env", putBody)
+	req.AddCookie(session)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second put expected 200, got %d", rec.Code)
+	}
+	if len(restartScopes) != 0 {
+		t.Fatalf("expected no restart on unchanged env, got %#v", restartScopes)
+	}
+}
+
+func TestHandlePluginSwitchesEnvRestartsPlugin(t *testing.T) {
+	pm := plugin.NewManager()
+	if _, err := pm.Register(context.Background(), &webStubPlugin{desc: plugin.Descriptor{
+		PluginID: "external.demo",
+		Name:     "Demo",
+	}}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if _, err := store.LoadOrCreateDefault(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	var restarts []string
+	s := New(store, pm)
+	s.SetPluginEnvChangeHandler(func(ctx context.Context, scope string, pluginID string) {
+		restarts = append(restarts, scope+":"+pluginID)
+	})
+	handler := s.Handler()
+	session := loginTestSession(t, handler, store)
+
+	body := bytes.NewBufferString(`{"env":{"CHROME_PATH":"/usr/bin/chromium","EMPTY":""}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/plugins/external.demo/switches", body)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(restarts, []string{"plugin:external.demo"}) {
+		t.Fatalf("expected plugin restart, got %#v", restarts)
+	}
+
+	control := store.Get().PluginControls["external.demo"]
+	if control.Env["CHROME_PATH"] != "/usr/bin/chromium" || control.Env["EMPTY"] != "" {
+		t.Fatalf("unexpected env: %#v", control.Env)
+	}
+
+	// list state includes env
+	req = httptest.NewRequest(http.MethodGet, "/api/plugins", nil)
+	req.AddCookie(session)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list expected 200, got %d", rec.Code)
+	}
+	var items []pluginListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(items) != 1 || items[0].State.Env["CHROME_PATH"] != "/usr/bin/chromium" {
+		t.Fatalf("expected env in state, got %#v", items)
+	}
+}

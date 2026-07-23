@@ -40,6 +40,8 @@ type pluginSwitchPatch struct {
 	CommandAccess    map[string]config.AccessControl `json:"command_access,omitempty"`
 	EventAccess      map[string]config.AccessControl `json:"event_access,omitempty"`
 	CommandOverrides map[string][]config.Override    `json:"command_overrides,omitempty"`
+	// Env replaces the plugin env map when non-nil (empty object clears all).
+	Env map[string]string `json:"env,omitempty"`
 }
 
 type pluginStateView struct {
@@ -54,6 +56,7 @@ type pluginStateView struct {
 	CommandAccess    map[string]config.AccessControl `json:"command_access"`
 	EventAccess      map[string]config.AccessControl `json:"event_access"`
 	CommandOverrides map[string][]config.Override    `json:"command_overrides"`
+	Env              map[string]string               `json:"env"`
 }
 
 type pluginListItem struct {
@@ -71,6 +74,9 @@ type Server struct {
 	sessions                 *sessionManager
 	onChatLogConfigChange    func(context.Context, config.ChatLogConfig)
 	onTriggerLogConfigChange func(context.Context, config.TriggerLogConfig)
+	// onPluginEnvChange is called after plugin env changes are persisted.
+	// scope is "global" or "plugin"; pluginID is set when scope is "plugin".
+	onPluginEnvChange func(ctx context.Context, scope string, pluginID string)
 }
 
 // StatsProvider 提供统计信息的接口
@@ -98,6 +104,10 @@ func (s *Server) SetTriggerLogConfigChangeHandler(fn func(context.Context, confi
 	s.onTriggerLogConfigChange = fn
 }
 
+func (s *Server) SetPluginEnvChangeHandler(fn func(ctx context.Context, scope string, pluginID string)) {
+	s.onPluginEnvChange = fn
+}
+
 func (s *Server) SetTriggerRecorder(recorder *triggerlog.Recorder) {
 	s.triggerRecorder = recorder
 }
@@ -110,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/globals", s.handleGlobals)
+	mux.HandleFunc("/api/plugin-env", s.handlePluginEnv)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/bots", s.handleBots)
 	mux.HandleFunc("/api/plugins", s.handlePlugins)
@@ -151,6 +162,7 @@ func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppCon
 		Status:       "Unknown",
 		EnableSleep:  true,
 		SleepTimeout: 60,
+		Env:          map[string]string{},
 	}
 	if control, ok := cfg.PluginControls[desc.PluginID]; ok {
 		state.CommandPrefix = control.CommandPrefix
@@ -158,6 +170,9 @@ func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppCon
 		state.CommandAccess = control.CommandAccess
 		state.EventAccess = control.EventAccess
 		state.CommandOverrides = control.CommandOverrides
+		if control.Env != nil {
+			state.Env = control.Env
+		}
 		if control.EnableSleep != nil {
 			state.EnableSleep = *control.EnableSleep
 		} else {
@@ -235,7 +250,22 @@ func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatc
 	if patch.CommandOverrides != nil {
 		control.CommandOverrides = patch.CommandOverrides
 	}
+	if patch.Env != nil {
+		control.Env = config.NormalizeStringMap(patch.Env)
+	}
 	return control
+}
+
+func validateEnvMap(env map[string]string) error {
+	if env == nil {
+		return nil
+	}
+	for k := range env {
+		if err := config.ValidateEnvKey(k); err != nil {
+			return fmt.Errorf("invalid env key %q: %w", k, err)
+		}
+	}
+	return nil
 }
 
 func applyListenerSwitches(disabled []string, patch map[string]bool) []string {
@@ -461,6 +491,15 @@ func (s *Server) handlePluginSwitchesAPI(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
+	if err := validateEnvMap(patch.Env); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+
+	prevEnv := map[string]string(nil)
+	if prev, ok := s.store.Get().PluginControls[pluginID]; ok {
+		prevEnv = prev.Env
+	}
 
 	cfg, err := s.store.Update(func(c *config.AppConfig) {
 		if c.PluginControls == nil {
@@ -472,6 +511,12 @@ func (s *Server) handlePluginSwitchesAPI(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
+	}
+
+	if patch.Env != nil && !config.StringMapsEqual(prevEnv, cfg.PluginControls[pluginID].Env) {
+		if s.onPluginEnvChange != nil {
+			s.onPluginEnvChange(r.Context(), "plugin", pluginID)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -739,6 +784,61 @@ func (s *Server) handleGlobals(w http.ResponseWriter, r *http.Request) {
 		}
 		s.hotApplyAllPluginConfigs(r.Context(), cfg)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "globals": cfg.Globals})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handlePluginEnv(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := s.store.Get()
+		env := cfg.PluginEnv
+		if env == nil {
+			env = map[string]string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"plugin_env": env})
+	case http.MethodPut:
+		var patch struct {
+			PluginEnv map[string]string `json:"plugin_env"`
+		}
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&patch); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := validateEnvMap(patch.PluginEnv); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		prev := s.store.Get().PluginEnv
+		normalized := config.NormalizeStringMap(patch.PluginEnv)
+		if normalized == nil {
+			normalized = map[string]string{}
+		}
+
+		cfg, err := s.store.Update(func(c *config.AppConfig) {
+			c.PluginEnv = make(map[string]string, len(normalized))
+			keys := make([]string, 0, len(normalized))
+			for k := range normalized {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				c.PluginEnv[k] = normalized[k]
+			}
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+
+		if !config.StringMapsEqual(prev, cfg.PluginEnv) && s.onPluginEnvChange != nil {
+			s.onPluginEnvChange(r.Context(), "global", "")
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plugin_env": cfg.PluginEnv})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

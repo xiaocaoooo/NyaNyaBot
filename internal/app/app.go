@@ -242,6 +242,14 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	// 设置 triggerRecorder 到 PluginHost
 	ph.SetTriggerRecorder(triggerRecorder)
+	ph.SetPluginEnvProvider(func() map[string]string {
+		cfg := store.Get()
+		out := make(map[string]string, len(cfg.PluginEnv))
+		for k, v := range cfg.PluginEnv {
+			out[k] = v
+		}
+		return out
+	})
 
 	// 连接追踪系统
 	disp.SetTraceProvider(ph)
@@ -251,6 +259,20 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 	webSrv.SetStatsProvider(st)
 	webSrv.SetReverseWSServer(ob)
 	webSrv.SetTriggerRecorder(triggerRecorder)
+	webSrv.SetPluginEnvChangeHandler(func(ctx context.Context, scope string, pluginID string) {
+		var err error
+		switch scope {
+		case "plugin":
+			err = ph.RestartPlugin(ctx, pluginID)
+		default:
+			err = ph.RestartPlugins(ctx, nil)
+		}
+		if err != nil {
+			logger.Error("plugin env restart failed", "scope", scope, "plugin_id", pluginID, "err", err)
+		} else {
+			logger.Info("plugin env restart completed", "scope", scope, "plugin_id", pluginID)
+		}
+	})
 	webSrv.SetChatLogConfigChangeHandler(func(ctx context.Context, chatLogCfg config.ChatLogConfig) {
 		if err := chatRecorder.Reconnect(ctx, chatLogCfg.DatabaseURI); err != nil {
 			logger.Error("chatlog runtime reconnect failed", "err", err)

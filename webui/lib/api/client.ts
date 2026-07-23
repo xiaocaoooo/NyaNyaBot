@@ -19,8 +19,10 @@ import type {
   TriggerLogQuery,
   TriggerLogsResponse,
   TriggerStatistics,
+  PluginEnvResponse,
   UpdateGlobalsPayload,
   UpdatePluginConfigPayload,
+  UpdatePluginEnvPayload,
   UpdatePluginSwitchesPayload,
   UpdatePluginSwitchesResponse,
 } from "@/lib/api/types";
@@ -121,6 +123,7 @@ function normalizePluginState(state: Partial<PluginStateView> | null | undefined
     command_access: state?.command_access,
     event_access: state?.event_access,
     command_overrides: state?.command_overrides ?? {},
+    env: state?.env ?? {},
   };
 }
 
@@ -195,6 +198,15 @@ export const apiClient = {
   },
   updateGlobals(payload: UpdateGlobalsPayload) {
     return requestJSON<GlobalsResponse>("/api/globals", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  fetchPluginEnv() {
+    return requestJSON<PluginEnvResponse>("/api/plugin-env");
+  },
+  updatePluginEnv(payload: UpdatePluginEnvPayload) {
+    return requestJSON<PluginEnvResponse>("/api/plugin-env", {
       method: "PUT",
       body: JSON.stringify(payload),
     });

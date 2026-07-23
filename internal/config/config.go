@@ -43,6 +43,9 @@ type AppConfig struct {
 	Dedup        DedupConfig `json:"dedup"`
 	// GlobalSleepTimeout defines the default sleep timeout in seconds for plugins.
 	GlobalSleepTimeout int `json:"global_sleep_timeout,omitempty"`
+	// PluginEnv are environment variables applied to every plugin process.
+	// Per-plugin PluginControl.Env overrides these. Both overlay the host process environment.
+	PluginEnv map[string]string `json:"plugin_env,omitempty"`
 }
 
 // AccessControl defines whitelist and blacklist for users and groups.
@@ -126,6 +129,9 @@ type PluginControl struct {
 	EnableSleep *bool `json:"enable_sleep,omitempty"`
 	// SleepTimeout 0=use global, >0=override
 	SleepTimeout int `json:"sleep_timeout,omitempty"`
+	// Env are environment variables applied to this plugin process.
+	// They override AppConfig.PluginEnv and the host process environment.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 func (pc PluginControl) IsEmpty() bool {
@@ -139,6 +145,9 @@ func (pc PluginControl) IsEmpty() bool {
 		return false
 	}
 	if pc.CommandPrefix != "" || (pc.EnableSleep != nil && !*pc.EnableSleep) || (pc.SleepTimeout != 0 && pc.SleepTimeout != 60) {
+		return false
+	}
+	if len(pc.Env) > 0 {
 		return false
 	}
 	return true
@@ -197,6 +206,7 @@ func Default() AppConfig {
 		},
 		MessagePrefix:  defaultMessagePrefix,
 		Globals:        make(map[string]string),
+		PluginEnv:      make(map[string]string),
 		Plugins:        make(map[string]json.RawMessage),
 		PluginControls: make(map[string]PluginControl),
 		ChatLog:        ChatLogConfig{DatabaseURI: ""},
@@ -346,6 +356,19 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 	}
 	if cfg.Globals == nil {
 		cfg.Globals = make(map[string]string)
+		changed = true
+	}
+	normalizedPluginEnv := normalizeStringMap(cfg.PluginEnv)
+	if cfg.PluginEnv == nil {
+		cfg.PluginEnv = make(map[string]string)
+		changed = true
+	} else if !stringMapsEqual(cfg.PluginEnv, normalizedPluginEnv) {
+		// Keep non-nil map for in-memory use even when empty after normalize.
+		if normalizedPluginEnv == nil {
+			cfg.PluginEnv = make(map[string]string)
+		} else {
+			cfg.PluginEnv = normalizedPluginEnv
+		}
 		changed = true
 	}
 	if cfg.Plugins == nil {
@@ -565,6 +588,7 @@ func normalizePluginControls(in map[string]PluginControl) map[string]PluginContr
 		if control.SleepTimeout <= 0 {
 			control.SleepTimeout = 60
 		}
+		control.Env = normalizeStringMap(control.Env)
 		if control.IsEmpty() {
 			continue
 		}
@@ -679,8 +703,108 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 				}
 			}
 		}
+		if !stringMapsEqual(leftControl.Env, rightControl.Env) {
+			return false
+		}
 	}
 	return true
+}
+
+// NormalizeStringMap trims keys, drops empty keys, and preserves empty values.
+func NormalizeStringMap(in map[string]string) map[string]string {
+	return normalizeStringMap(in)
+}
+
+func normalizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func stringMapsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for k, lv := range left {
+		rv, ok := right[k]
+		if !ok || lv != rv {
+			return false
+		}
+	}
+	return true
+}
+
+// StringMapsEqual reports whether two string maps are equal.
+func StringMapsEqual(left, right map[string]string) bool {
+	return stringMapsEqual(left, right)
+}
+
+// MergeProcessEnv builds an environment slice for a plugin process.
+// Order: host environ < global plugin env < per-plugin env (later overrides).
+func MergeProcessEnv(hostEnviron []string, globalEnv, pluginEnv map[string]string) []string {
+	merged := make(map[string]string, len(hostEnviron)+len(globalEnv)+len(pluginEnv))
+	order := make([]string, 0, len(hostEnviron)+len(globalEnv)+len(pluginEnv))
+
+	for _, entry := range hostEnviron {
+		if entry == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := merged[key]; !exists {
+			order = append(order, key)
+		}
+		merged[key] = val
+	}
+	applyEnvOverlay := func(overlay map[string]string) {
+		for k, v := range overlay {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			if _, exists := merged[k]; !exists {
+				order = append(order, k)
+			}
+			merged[k] = v
+		}
+	}
+	applyEnvOverlay(globalEnv)
+	applyEnvOverlay(pluginEnv)
+
+	out := make([]string, 0, len(order))
+	for _, k := range order {
+		out = append(out, k+"="+merged[k])
+	}
+	return out
+}
+
+// ValidateEnvKey reports whether an environment variable key is acceptable.
+func ValidateEnvKey(key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("env key is empty")
+	}
+	if strings.Contains(key, "=") {
+		return errors.New("env key must not contain '='")
+	}
+	if strings.ContainsRune(key, 0) {
+		return errors.New("env key must not contain null bytes")
+	}
+	return nil
 }
 
 func accessControlEqual(left, right AccessControl) bool {
