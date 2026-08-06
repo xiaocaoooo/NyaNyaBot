@@ -28,7 +28,6 @@ COPY . .
 # Copy the built frontend assets from the frontend-builder stage
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
 
-
 # Build the main application
 RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
 
@@ -38,13 +37,20 @@ FROM alpine:latest
 # Install ca-certificates for timezone data and HTTPS requests
 RUN apk add --no-cache ca-certificates tzdata
 
+# Create dedicated non-root group and user with fixed IDs for best security engineering practices
+RUN addgroup -g 10001 -S appgroup && \
+    adduser -u 10001 -S -G appgroup -h /app -s /sbin/nologin appuser
+
 WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/bin/nyanyabot .
 
-# Create necessary directories for data and plugins
-RUN mkdir -p /app/data /app/plugins
+# Create necessary directories for data and plugins, and assign ownership
+RUN mkdir -p /app/data /app/plugins && \
+    chown -R appuser:appgroup /app
+
+USER appuser:appgroup
 
 # Expose WebUI and OneBot Reverse WS ports
 EXPOSE 3000 3001
