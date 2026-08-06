@@ -39,10 +39,19 @@ FROM alpine:latest
 # Install ca-certificates for timezone data and HTTPS requests
 RUN apk add --no-cache ca-certificates tzdata
 
+# Create dedicated non-root group and user with fixed IDs for best security engineering practices
+RUN addgroup -g 10001 -S appgroup && \
+    adduser -u 10001 -S -G appgroup -h /app -s /sbin/nologin appuser
+
 WORKDIR /app
 COPY --from=builder /app/bin/nyanyabot .
+
+# Create necessary directories for data and plugins, and assign ownership
 RUN mkdir -p /app/data /app/plugins && \
     chown -R appuser:appgroup /app
-USER appuser
+
+USER appuser:appgroup
+
+# Expose WebUI and OneBot Reverse WS ports
 EXPOSE 3000 3001
 ENTRYPOINT ["./nyanyabot"]
