@@ -1,53 +1,41 @@
-# Frontend build stage
 FROM node:20-alpine AS frontend-builder
 
-WORKDIR /app
-
-# Copy frontend source
-COPY webui ./webui
-
-# Install dependencies and build
 WORKDIR /app/webui
-RUN npm install && npm run build
 
-# Build stage
-FROM golang:1.25.6-alpine AS builder
+COPY webui/package*.json ./
 
-# Install build dependencies
-RUN apk add --no-cache git
+RUN npm ci --production=false
+
+COPY webui/ ./
+
+RUN npm run build
+
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy go.mod and go.sum and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
-# Copy the source code
 COPY . .
 
-# Copy the built frontend assets from the frontend-builder stage
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -trimpath" \
+    -o /app/bin/nyanyabot \
+    ./cmd/nyanyabot
 
-# Build the main application
-RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
-
-# Runtime stage
-FROM alpine:latest
-
-# Install ca-certificates for timezone data and HTTPS requests
-RUN apk add --no-cache ca-certificates tzdata
-
+FROM alpine:3.21 AS runtime-alpine
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -g 1000 -S appgroup && \
+    adduser -u 1000 -S appuser -G appgroup
 WORKDIR /app
-
-# Copy the binary from the builder stage
 COPY --from=builder /app/bin/nyanyabot .
-
-# Create necessary directories for data and plugins
-RUN mkdir -p /app/data /app/plugins
-
-# Expose WebUI and OneBot Reverse WS ports
+RUN mkdir -p /app/data /app/plugins && \
+    chown -R appuser:appgroup /app
+USER appuser
 EXPOSE 3000 3001
-
-# Run the application
 ENTRYPOINT ["./nyanyabot"]
