@@ -344,7 +344,7 @@ func (h hostAPI) CallOneBot(ctx context.Context, action string, params any, self
 	// 如果有活跃的 TraceID，记录追踪信息
 	if traceID != "" && h.host != nil {
 		if record, ok := h.host.GetTraceRecord(traceID); ok {
-			h.host.logger.Info("plugin CallOneBot",
+			h.host.logger.Debug("plugin CallOneBot",
 				"trace_id", traceID,
 				"plugin_id", h.callerPluginID,
 				"listener_id", record.ListenerID,
