@@ -1,14 +1,17 @@
 # Frontend build stage
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
-WORKDIR /app
-
-# Copy frontend source
-COPY webui ./webui
-
-# Install dependencies and build
 WORKDIR /app/webui
-RUN npm install && npm run build
+
+RUN corepack enable
+
+# Copy lockfiles and install dependencies
+COPY webui/package.json webui/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# Copy full webui source and build
+COPY webui/ ./
+RUN pnpm run build
 
 # Build stage
 FROM golang:1.25.6-alpine AS builder
@@ -27,7 +30,6 @@ COPY . .
 
 # Copy the built frontend assets from the frontend-builder stage
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
-
 
 # Build the main application
 RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
