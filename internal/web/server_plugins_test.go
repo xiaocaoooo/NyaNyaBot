@@ -105,7 +105,7 @@ func TestHandlePluginsReturnsMergedState(t *testing.T) {
 	}})
 	if _, err := store.Update(func(c *config.AppConfig) {
 		c.PluginControls["external.demo"] = config.PluginControl{
-			Disabled:         true,
+			Enabled: &[]bool{false}[0],
 			DisabledCommands: []string{"cmd.two"},
 		}
 	}); err != nil {
@@ -199,7 +199,7 @@ func TestHandlePluginSwitchesPersistsState(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected plugin control persisted, got %#v", cfg.PluginControls)
 	}
-	if !control.Disabled {
+	if control.Enabled == nil || *control.Enabled {
 		t.Fatalf("expected plugin disabled, got %#v", control)
 	}
 	if !reflect.DeepEqual(control.DisabledCommands, []string{"cmd.one"}) {
@@ -220,7 +220,7 @@ func TestHandlePluginSwitchesPersistsState(t *testing.T) {
 
 	cfg = store.Get()
 	control = cfg.PluginControls["external.demo"]
-	if !control.Disabled {
+	if control.Enabled == nil || *control.Enabled {
 		t.Fatalf("expected plugin disabled to remain unchanged, got %#v", control)
 	}
 	if len(control.DisabledCommands) != 0 {

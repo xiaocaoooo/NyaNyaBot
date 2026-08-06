@@ -89,11 +89,15 @@ func TestDispatchSkipsDisabledPlugin(t *testing.T) {
 		Events:   []plugin.EventListener{{ID: "evt.enabled", Event: "message"}},
 	}}
 
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		PluginControls: map[string]config.PluginControl{
-			"external.disabled": {Disabled: true},
+			"external.disabled": {Enabled: &[]bool{false}[0]},
+			"external.enabled": {Enabled: &[]bool{true}[0]},
 		},
-	}, disabledPlugin, enabledPlugin)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, disabledPlugin, enabledPlugin)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 
@@ -114,11 +118,14 @@ func TestDispatchSkipsDisabledEventListener(t *testing.T) {
 		},
 	}}
 
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		PluginControls: map[string]config.PluginControl{
 			"external.events": {DisabledEvents: []string{"evt.disabled"}},
 		},
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","raw_message":"hello","message":"hello"}`))
 
@@ -136,11 +143,14 @@ func TestDispatchSkipsDisabledCommandListener(t *testing.T) {
 		},
 	}}
 
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		PluginControls: map[string]config.PluginControl{
 			"external.commands": {DisabledCommands: []string{"cmd.disabled"}},
 		},
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 
@@ -154,9 +164,12 @@ func TestDispatchStripsGlobalPrefix(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
@@ -169,12 +182,15 @@ func TestDispatchStripsPluginPrefix(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
 		PluginControls: map[string]config.PluginControl{
 			"external.commands": {CommandPrefix: `^#(?P<content>.+)$`},
 		},
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"#ping","message":"#ping"}`))
 	if !reflect.DeepEqual(p.handled, []string{"cmd.ping"}) {
@@ -187,9 +203,12 @@ func TestDispatchSkipsCommandWithoutPrefixMatch(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	// Without matching prefix, command should be skipped
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"ping","message":"ping"}`))
@@ -203,9 +222,12 @@ func TestDispatchMatchesCommandWithPrefix(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.ping", Pattern: `^ping$`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	// With matching prefix, command should match
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/ping","message":"/ping"}`))
@@ -219,7 +241,7 @@ func TestDispatchAppliesGlobalAndCommandOverridesInOrder(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.alias", Pattern: `^正式 (.+)$`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
 		PluginControls: map[string]config.PluginControl{
 			"external.commands": {
@@ -229,7 +251,10 @@ func TestDispatchAppliesGlobalAndCommandOverridesInOrder(t *testing.T) {
 				},
 			},
 		},
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message_type":"group","user_id":123,"self_id":456,"raw_message":"/别名 参数","message":"/别名 参数"}`))
 
@@ -290,7 +315,10 @@ func TestDispatchInjectsContentForStringMessage(t *testing.T) {
 		PluginID: "external.events",
 		Events:   []plugin.EventListener{{ID: "evt.message", Event: "message"}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{}, p)
+	cfg := config.AppConfig{}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{"post_type":"message","message":"hello world"}`))
 
@@ -317,9 +345,12 @@ func TestDispatchInjectsContentForMixedSegments(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^hello`}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{
 		"post_type":"message",
@@ -358,7 +389,10 @@ func TestDispatchInjectsEmptyContentForNoTextSegments(t *testing.T) {
 		PluginID: "external.events",
 		Events:   []plugin.EventListener{{ID: "evt.message", Event: "message"}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{}, p)
+	cfg := config.AppConfig{}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), messageEvent(`{
 		"post_type":"message",
@@ -391,7 +425,10 @@ func TestDispatchDoesNotInjectContentForNonMessageEvent(t *testing.T) {
 		PluginID: "external.events",
 		Events:   []plugin.EventListener{{ID: "evt.notice", Event: "notice"}},
 	}}
-	disp := newTestDispatcher(t, config.AppConfig{}, p)
+	cfg := config.AppConfig{}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 
 	disp.Dispatch(context.Background(), ob11.Event([]byte(`{"post_type":"notice","notice_type":"group_upload"}`)))
 
@@ -414,11 +451,13 @@ func TestDispatchDeduplicatesMessages(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
 	}}
-	dedupEnabled := true
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-		MessageDedup:  &dedupEnabled,
-	}, p)
+		MessageDedup:  &[]bool{true}[0],
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 	// 设置 deduper
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
@@ -441,11 +480,13 @@ func TestDispatchDedupDifferentGroups(t *testing.T) {
 		PluginID: "external.commands",
 		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
 	}}
-	dedupEnabled := true
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
-		MessageDedup:  &dedupEnabled,
-	}, p)
+		MessageDedup:  &[]bool{true}[0],
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 	// 设置 deduper
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
@@ -467,10 +508,13 @@ func TestDispatchDedupDisabled(t *testing.T) {
 		Commands: []plugin.CommandListener{{ID: "cmd.test", Pattern: `^test$`}},
 	}}
 	dedupDisabled := false
-	disp := newTestDispatcher(t, config.AppConfig{
+	cfg := config.AppConfig{
 		MessagePrefix: `^/(?P<content>.+)$`,
 		MessageDedup:  &dedupDisabled,
-	}, p)
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 	// 设置 deduper（即使设置了，也应该因为配置禁用而不使用）
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
@@ -490,10 +534,12 @@ func TestDispatchDedupNonGroupMessage(t *testing.T) {
 		PluginID: "external.events",
 		Events:   []plugin.EventListener{{ID: "evt.message", Event: "message"}},
 	}}
-	dedupEnabled := true
-	disp := newTestDispatcher(t, config.AppConfig{
-		MessageDedup: &dedupEnabled,
-	}, p)
+	cfg := config.AppConfig{
+		MessageDedup: &[]bool{true}[0],
+	}
+	if cfg.PluginControls == nil { cfg.PluginControls = make(map[string]config.PluginControl) }
+	for _, pluginID := range []string{"external.events", "external.commands", "external.prefix", "external.overrides", "external.dedup"} { if control, ok := cfg.PluginControls[pluginID]; !ok { cfg.PluginControls[pluginID] = config.PluginControl{Enabled: &[]bool{true}[0]} } else { control.Enabled = &[]bool{true}[0]; cfg.PluginControls[pluginID] = control } }
+	disp := newTestDispatcher(t, cfg, p)
 	// 设置 deduper
 	disp.deduper = dedup.NewMemoryDeduper(5 * time.Minute)
 
