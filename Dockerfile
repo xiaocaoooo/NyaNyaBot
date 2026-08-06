@@ -1,31 +1,33 @@
 # Frontend build stage
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
-WORKDIR /app
-
-# Copy frontend source
-COPY webui ./webui
-
-# Install dependencies and build
 WORKDIR /app/webui
-RUN npm install && npm run build
 
-# Build stage
-FROM golang:1.25.6-alpine AS builder
+RUN corepack enable
 
-# Install build dependencies
-RUN apk add --no-cache git
+# Copy lockfiles and install dependencies
+COPY webui/package.json webui/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# Copy full webui source and build
+COPY webui/ ./
+RUN pnpm run build
+
+COPY webui/ ./
+
+RUN npm run build
+
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy go.mod and go.sum and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
-# Copy the source code
 COPY . .
 
-# Copy the built frontend assets from the frontend-builder stage
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
 
 # Build the main application
@@ -42,8 +44,6 @@ RUN addgroup -g 10001 -S appgroup && \
     adduser -u 10001 -S -G appgroup -h /app -s /sbin/nologin appuser
 
 WORKDIR /app
-
-# Copy the binary from the builder stage
 COPY --from=builder /app/bin/nyanyabot .
 
 # Create necessary directories for data and plugins, and assign ownership
@@ -54,6 +54,4 @@ USER appuser:appgroup
 
 # Expose WebUI and OneBot Reverse WS ports
 EXPOSE 3000 3001
-
-# Run the application
 ENTRYPOINT ["./nyanyabot"]
