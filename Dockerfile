@@ -13,22 +13,21 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY webui/ ./
 RUN pnpm run build
 
-# Build stage
-FROM golang:1.25.6-alpine AS builder
+COPY webui/ ./
 
-# Install build dependencies
-RUN apk add --no-cache git
+RUN npm run build
+
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy go.mod and go.sum and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
-# Copy the source code
 COPY . .
 
-# Copy the built frontend assets from the frontend-builder stage
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
 
 # Build the main application
@@ -41,15 +40,9 @@ FROM alpine:latest
 RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
-
-# Copy the binary from the builder stage
 COPY --from=builder /app/bin/nyanyabot .
-
-# Create necessary directories for data and plugins
-RUN mkdir -p /app/data /app/plugins
-
-# Expose WebUI and OneBot Reverse WS ports
+RUN mkdir -p /app/data /app/plugins && \
+    chown -R appuser:appgroup /app
+USER appuser
 EXPOSE 3000 3001
-
-# Run the application
 ENTRYPOINT ["./nyanyabot"]
