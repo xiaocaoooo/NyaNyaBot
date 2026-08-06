@@ -1,10 +1,17 @@
-FROM node:20-alpine AS frontend-builder
+# Frontend build stage
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app/webui
 
-COPY webui/package*.json ./
+RUN corepack enable
 
-RUN npm ci --production=false
+# Copy lockfiles and install dependencies
+COPY webui/package.json webui/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# Copy full webui source and build
+COPY webui/ ./
+RUN pnpm run build
 
 COPY webui/ ./
 
@@ -23,15 +30,15 @@ COPY . .
 
 COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w -trimpath" \
-    -o /app/bin/nyanyabot \
-    ./cmd/nyanyabot
+# Build the main application
+RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
 
-FROM alpine:3.21 AS runtime-alpine
-RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -g 1000 -S appgroup && \
-    adduser -u 1000 -S appuser -G appgroup
+# Runtime stage
+FROM alpine:latest
+
+# Install ca-certificates for timezone data and HTTPS requests
+RUN apk add --no-cache ca-certificates tzdata
+
 WORKDIR /app
 COPY --from=builder /app/bin/nyanyabot .
 RUN mkdir -p /app/data /app/plugins && \
