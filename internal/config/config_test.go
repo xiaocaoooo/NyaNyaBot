@@ -104,7 +104,7 @@ func TestLoadOrCreateDefaultNormalizesPluginControls(t *testing.T) {
       "disabled_events": ["evt.b", "evt.a", "evt.a"]
     },
     "external.empty": {},
-    "": {"disabled": true},
+    "": {"enabled": false},
     "external.prefix": {
       "command_prefix": " /plugin"
     },
@@ -154,8 +154,8 @@ func TestLoadOrCreateDefaultNormalizesPluginControls(t *testing.T) {
 	if !reflect.DeepEqual(overridesControl.CommandOverrides, expectedOverrides) {
 		t.Fatalf("unexpected normalized command overrides: %#v", overridesControl.CommandOverrides)
 	}
-	if cfg.IsPluginEnabled("external.demo") != true {
-		t.Fatal("expected plugin to stay enabled when disabled flag is false")
+	if cfg.IsPluginEnabled("external.demo") != false {
+		t.Fatal("expected plugin to stay disabled when enabled flag is not set")
 	}
 	if cfg.IsCommandEnabled("external.demo", "cmd.a") != false {
 		t.Fatal("expected cmd.a to be disabled")

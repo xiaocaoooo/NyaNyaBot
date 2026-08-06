@@ -114,7 +114,7 @@ type Override struct {
 
 // PluginControl stores host-side enable/disable state.
 type PluginControl struct {
-	Disabled         bool                     `json:"disabled,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
 	DisabledCommands []string                 `json:"disabled_commands,omitempty"`
 	DisabledEvents   []string                 `json:"disabled_events,omitempty"`
 	DisabledCrons    []string                 `json:"disabled_crons,omitempty"`
@@ -135,7 +135,7 @@ type PluginControl struct {
 }
 
 func (pc PluginControl) IsEmpty() bool {
-	if pc.Disabled || len(pc.DisabledCommands) > 0 || len(pc.DisabledEvents) > 0 || len(pc.DisabledCrons) > 0 {
+	if pc.Enabled != nil && !*pc.Enabled || len(pc.DisabledCommands) > 0 || len(pc.DisabledEvents) > 0 || len(pc.DisabledCrons) > 0 {
 		return false
 	}
 	if !pc.Access.IsEmpty() || len(pc.CommandAccess) > 0 || len(pc.EventAccess) > 0 {
@@ -422,13 +422,16 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 func (c AppConfig) IsPluginEnabled(pluginID string) bool {
 	pluginID = strings.TrimSpace(pluginID)
 	if pluginID == "" {
-		return true
+		return false
 	}
 	control, ok := c.PluginControls[pluginID]
 	if !ok {
-		return true
+		return false
 	}
-	return !control.Disabled
+	if control.Enabled == nil {
+		return false
+	}
+	return *control.Enabled
 }
 
 func (c AppConfig) IsCommandEnabled(pluginID string, listenerID string) bool {
@@ -659,7 +662,7 @@ func pluginControlsEqual(left map[string]PluginControl, right map[string]PluginC
 		if !ok {
 			return false
 		}
-		if leftControl.Disabled != rightControl.Disabled {
+		if !boolPtrEqual(leftControl.Enabled, rightControl.Enabled) {
 			return false
 		}
 		if leftControl.CommandPrefix != strings.TrimSpace(rightControl.CommandPrefix) {
@@ -864,4 +867,13 @@ func generateWebUIPassword(length int) (string, error) {
 		return "", errors.New("generated password is too short")
 	}
 	return encoded[:length], nil
+}
+func boolPtrEqual(left, right *bool) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	return *left == *right
 }

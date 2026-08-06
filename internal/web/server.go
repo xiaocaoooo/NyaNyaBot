@@ -221,7 +221,7 @@ func buildPluginState(ctx context.Context, pm *plugin.Manager, cfg config.AppCon
 
 func applyPluginSwitchPatch(control config.PluginControl, patch pluginSwitchPatch) config.PluginControl {
 	if patch.Enabled != nil {
-		control.Disabled = !*patch.Enabled
+		control.Enabled = patch.Enabled
 	}
 	if patch.CommandPrefix != nil {
 		control.CommandPrefix = strings.TrimSpace(*patch.CommandPrefix)
