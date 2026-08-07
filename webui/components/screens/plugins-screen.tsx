@@ -17,7 +17,6 @@ import { apiClient } from "@/lib/api/client";
 import type { PluginListItem, AccessControl } from "@/lib/api/types";
 import { FormField } from "@/components/ui/form-field";
 
-console.log('🚀 plugins-screen.tsx 文件已加载');
 
 type EditorMode = "schema" | "json";
 type JSONSchema = {
@@ -445,7 +444,6 @@ function GlobalVariableUsageHint({ t }: { t: TranslateFn }) {
 }
 
 export function PluginsScreen() {
-  console.log('🎯 PluginsScreen 组件开始渲染');
   const { t } = useI18n();
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -858,12 +856,12 @@ export function PluginsScreen() {
                                   !plugin.state.enabled
                                     ? "bg-default-400"
                                     : plugin.state.status === "Running"
-                                      ? "bg-success shadow-[0_0_8px_rgba(24,198,131,0.5)]"
+                                      ? "bg-success shadow-[0_0_8px_rgba(var(--color-success),0.5)]"
                                       : plugin.state.status === "Idle"
-                                        ? "bg-primary shadow-[0_0_8px_rgba(0,111,238,0.5)]"
+                                        ? "bg-primary shadow-[0_0_8px_rgba(var(--color-primary),0.5)]"
                                         : plugin.state.status === "Sleeping"
                                           ? "bg-warning shadow-[0_0_8px_rgba(245,158,11,0.5)]"
-                                          : "bg-danger shadow-[0_0_8px_rgba(243,18,96,0.5)] animation-pulse"
+                                          : "bg-danger shadow-[0_0_8px_rgba(var(--color-danger),0.5)] animation-pulse"
                                 }`}
                               />
                               <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
@@ -1155,9 +1153,7 @@ export function PluginsScreen() {
                           {(selectedPlugin?.commands ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            (() => {
-                              console.log('🔍 渲染 commands 列表，数量:', selectedPlugin?.commands?.length);
-                              return (selectedPlugin?.commands ?? []).slice(0, 6).map((command) => {
+                            (selectedPlugin?.commands ?? []).map((command) => {
                                 const commandEnabled = selectedPlugin.state.commands?.[command.id] ?? true;
                               return (
                                 <li
@@ -1202,8 +1198,7 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            });
-                          })()
+                            })
                           )}
                         </ul>
                       </div>
@@ -1214,9 +1209,7 @@ export function PluginsScreen() {
                           {(selectedPlugin?.events ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            (() => {
-                              console.log('🔍 渲染 events 列表，数量:', selectedPlugin?.events?.length);
-                              return (selectedPlugin?.events ?? []).slice(0, 6).map((event) => {
+                            (selectedPlugin?.events ?? []).map((event) => {
                                 const eventEnabled = selectedPlugin.state.events?.[event.id] ?? true;
                               return (
                                 <li
@@ -1253,8 +1246,7 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            });
-                          })()
+                            })
                           )}
                         </ul>
                       </div>
@@ -1265,9 +1257,7 @@ export function PluginsScreen() {
                           {(selectedPlugin?.crons ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            (() => {
-                              console.log('🔍 渲染 crons 列表，数量:', selectedPlugin?.crons?.length);
-                              return (selectedPlugin?.crons ?? []).slice(0, 6).map((cron) => {
+                            (selectedPlugin?.crons ?? []).map((cron) => {
                                 const cronEnabled = selectedPlugin.state.crons?.[cron.id] ?? true;
                               return (
                                 <li
@@ -1294,8 +1284,7 @@ export function PluginsScreen() {
                                   </div>
                                 </li>
                               );
-                            });
-                          })()
+                            })
                           )}
                         </ul>
                       </div>
@@ -1306,14 +1295,11 @@ export function PluginsScreen() {
                           {(selectedPlugin?.dependencies ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            (() => {
-                              console.log('🔍 渲染 dependencies 列表，数量:', selectedPlugin?.dependencies?.length);
-                              return (selectedPlugin?.dependencies ?? []).slice(0, 6).map((dependency) => (
+                            (selectedPlugin?.dependencies ?? []).map((dependency) => (
                                 <li key={dependency}>
                                   <p className="font-mono text-xs">{dependency}</p>
                                 </li>
-                              ));
-                            })()
+                              ))
                           )}
                         </ul>
                       </div>
@@ -1324,15 +1310,12 @@ export function PluginsScreen() {
                           {(selectedPlugin?.exports ?? []).length === 0 ? (
                             <li>{t("plugins.none")}</li>
                           ) : (
-                            (() => {
-                              console.log('🔍 渲染 exports 列表，数量:', selectedPlugin?.exports?.length);
-                              return (selectedPlugin?.exports ?? []).slice(0, 6).map((spec) => (
+                            (selectedPlugin?.exports ?? []).map((spec) => (
                                 <li key={spec.name}>
                                   <p className="font-medium text-text">{spec.name}</p>
                                   <p className="text-xs text-muted">{spec.description || "-"}</p>
                                 </li>
-                              ));
-                            })()
+                              ))
                           )}
                         </ul>
                       </div>

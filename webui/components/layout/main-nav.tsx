@@ -53,7 +53,7 @@ export function MainNav() {
         <div className="flex items-center gap-3">
           <div
             aria-hidden="true"
-            className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/80 to-primary/50 shadow-[0_8px_20px_rgba(2,132,199,0.25)]"
+            className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/80 to-primary/50 shadow-[0_8px_20px_rgba(var(--color-primary),0.25)]"
           />
           <div>
             <p className="text-sm font-semibold tracking-wide text-text">NyaNyaBot</p>
@@ -79,7 +79,7 @@ export function MainNav() {
                 {active ? (
                   <motion.span
                     aria-hidden="true"
-                    className="absolute inset-0 -z-10 rounded-lg bg-primary shadow-[0_8px_18px_rgba(2,132,199,0.28)]"
+                    className="absolute inset-0 -z-10 rounded-lg bg-primary shadow-[0_8px_18px_rgba(var(--color-primary),0.28)]"
                     layoutId="main-nav-slider"
                     transition={{ bounce: 0.2, duration: 0.24 }}
                   />
