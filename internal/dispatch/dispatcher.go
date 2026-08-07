@@ -131,7 +131,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				if d.stats != nil {
 					d.stats.IncDedup()
 				}
-				d.logger.Info("[dispatch] duplicate message skipped",
+				d.logger.Debug("[dispatch] duplicate message skipped",
 					"group_id", groupID,
 					"message_seq", messageSeq,
 				)
@@ -155,7 +155,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			if !cfg.IsAllowed(pid, l.ID, false, userIDInt, groupIDInt) {
-				d.logger.Info("[dispatch] access denied for event",
+				d.logger.Debug("[dispatch] access denied for event",
 					"plugin_id", pid,
 					"event_id", l.ID,
 					"user_id", userIDInt,
@@ -164,6 +164,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			if matchEvent(l.Event, eventKey, eventKeyFull) {
+				d.logger.Info("[dispatch] event dispatched",
+					"plugin_id", pid,
+					"event_id", l.ID,
+					"event_type", eventKey,
+					"sub_type", eventKeyFull,
+					"group_id", groupID,
+					"user_id", userID,
+				)
 				// 生成 TraceID 并注册追踪记录
 				traceID := ""
 				if d.traceProvider != nil {
@@ -288,7 +296,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 		if d.stats != nil {
 			d.stats.IncFilteredNonGroup()
 		}
-		d.logger.Info("[dispatch] filtered non-group message",
+		d.logger.Debug("[dispatch] filtered non-group message",
 			"message_type", messageType,
 			"user_id", userID,
 		)
@@ -305,7 +313,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				if d.stats != nil {
 					d.stats.IncFilteredSelf()
 				}
-				d.logger.Info("[dispatch] filtered bot message",
+				d.logger.Debug("[dispatch] filtered bot message",
 					"user_id", userID,
 					"bot_id", botID,
 				)
@@ -350,7 +358,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			if !cfg.IsAllowed(pid, c.ID, true, userIDInt, groupIDInt) {
-				d.logger.Info("[dispatch] access denied for command",
+				d.logger.Debug("[dispatch] access denied for command",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"user_id", userIDInt,
@@ -363,7 +371,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				input = rawMsg
 			}
 			if input == "" {
-				d.logger.Info("[dispatch] skipping command (input empty)",
+				d.logger.Debug("[dispatch] skipping command (input empty)",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"match_raw", c.MatchRaw,
@@ -374,7 +382,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			}
 			strippedInput, matched, err := stripMessagePrefix(input, prefixPattern)
 			if err != nil {
-				d.logger.Info("[dispatch] prefix regex compile error",
+				d.logger.Error("[dispatch] prefix regex compile error",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"message_prefix", prefixPattern,
@@ -383,7 +391,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				continue
 			}
 			if !matched {
-				d.logger.Info("[dispatch] prefix not matched, skipping command",
+				d.logger.Debug("[dispatch] prefix not matched, skipping command",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"message_prefix", prefixPattern,
@@ -397,7 +405,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				input = applyConfiguredOverrides(input, control.CommandOverrides["global"])
 				input = applyConfiguredOverrides(input, control.CommandOverrides[c.ID])
 			}
-			d.logger.Info("[dispatch] trying command",
+			d.logger.Debug("[dispatch] trying command",
 				"plugin_id", pid,
 				"command_id", c.ID,
 				"pattern", c.Pattern,
@@ -405,7 +413,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			)
 			re, err := regexp.Compile(c.Pattern)
 			if err != nil {
-				d.logger.Info("[dispatch] regex compile error",
+				d.logger.Error("[dispatch] regex compile error",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"error", err,
@@ -414,7 +422,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			}
 			m := re.FindStringSubmatch(input)
 			if len(m) == 0 {
-				d.logger.Info("[dispatch] regex no match",
+				d.logger.Debug("[dispatch] regex no match",
 					"plugin_id", pid,
 					"command_id", c.ID,
 					"input", input,
@@ -422,7 +430,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 				)
 				continue
 			}
-			d.logger.Info("[dispatch] regex matched!",
+			d.logger.Debug("[dispatch] regex matched!",
 				"plugin_id", pid,
 				"command_id", c.ID,
 				"full_match", m[0],
@@ -432,7 +440,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, raw ob11.Event) {
 			if len(m) > 1 {
 				cm.Groups = append([]string(nil), m[1:]...)
 			}
-			d.logger.Info("[dispatch] calling plugin Handle",
+			d.logger.Debug("[dispatch] calling plugin Handle",
 				"plugin_id", pid,
 				"command_id", c.ID,
 			)
