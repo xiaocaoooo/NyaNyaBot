@@ -159,10 +159,6 @@ func ValidateDescriptor(d Descriptor) (Descriptor, error) {
 	if d.PluginID == "" {
 		return Descriptor{}, errors.New("plugin_id is empty")
 	}
-	basePluginID := d.PluginID
-	if base, _, hasAt := strings.Cut(d.PluginID, "@"); hasAt {
-		basePluginID = strings.TrimSpace(base)
-	}
 
 	seenDeps := make(map[string]struct{}, len(d.Dependencies))
 	deps := make([]string, 0, len(d.Dependencies))
@@ -171,7 +167,7 @@ func ValidateDescriptor(d Descriptor) (Descriptor, error) {
 		if dep == "" {
 			return Descriptor{}, fmt.Errorf("plugin %q has empty dependency", d.PluginID)
 		}
-		if dep == basePluginID || dep == d.PluginID {
+		if dep == d.PluginID {
 			return Descriptor{}, fmt.Errorf("plugin %q cannot depend on itself", d.PluginID)
 		}
 		if _, exists := seenDeps[dep]; exists {
