@@ -37,6 +37,12 @@ export interface AppConfig {
   message_prefix?: string;
   global_sleep_timeout?: number;
   global_access?: AccessControl;
+  bot_access?: {
+    whitelist_bots?: number[];
+    blacklist_bots?: number[];
+    default_policy?: 'allow' | 'deny';
+    reject_behavior?: 'disconnect' | 'ignore';
+  };
 }
 
 export interface ConfigPatch {
@@ -63,6 +69,12 @@ export interface ConfigPatch {
   message_prefix?: string;
   global_sleep_timeout?: number;
   global_access?: AccessControl;
+  bot_access?: {
+    whitelist_bots?: number[];
+    blacklist_bots?: number[];
+    default_policy?: 'allow' | 'deny';
+    reject_behavior?: 'disconnect' | 'ignore';
+  };
 }
 
 export interface PluginConfigSpec {

@@ -43,9 +43,43 @@ type AppConfig struct {
 	Dedup        DedupConfig `json:"dedup"`
 	// GlobalSleepTimeout defines the default sleep timeout in seconds for plugins.
 	GlobalSleepTimeout int `json:"global_sleep_timeout,omitempty"`
+	// BotAccess defines access control specifically for connecting bots.
+	BotAccess BotAccessConfig `json:"bot_access,omitempty"`
 	// PluginEnv are environment variables applied to every plugin process.
 	// Per-plugin PluginControl.Env overrides these. Both overlay the host process environment.
 	PluginEnv map[string]string `json:"plugin_env,omitempty"`
+}
+
+// BotAccessConfig defines whitelist and blacklist for connecting bots.
+type BotAccessConfig struct {
+	WhiteListBots  []int64 `json:"whitelist_bots,omitempty"`
+	BlackListBots  []int64 `json:"blacklist_bots,omitempty"`
+	DefaultPolicy  string  `json:"default_policy,omitempty"`  // "allow" (default) or "deny"
+	RejectBehavior string  `json:"reject_behavior,omitempty"` // "disconnect" (default) or "ignore"
+}
+
+// Allowed returns true if the bot ID is allowed to connect.
+func (ba BotAccessConfig) Allowed(botID int64) bool {
+	// 1. Whitelist check (highest priority)
+	for _, id := range ba.WhiteListBots {
+		if id == botID {
+			return true
+		}
+	}
+
+	// 2. Blacklist check
+	for _, id := range ba.BlackListBots {
+		if id == botID {
+			return false
+		}
+	}
+
+	// 3. Default policy
+	if ba.DefaultPolicy == "deny" {
+		return false
+	}
+	// default to allow
+	return true
 }
 
 // AccessControl defines whitelist and blacklist for users and groups.
@@ -385,6 +419,16 @@ func (s *Store) ensureDefaultsLocked(cfg *AppConfig) (bool, error) {
 		changed = true
 	}
 	cfg.GlobalAccess = normalizeAccessControl(cfg.GlobalAccess)
+	cfg.BotAccess.WhiteListBots = normalizeInt64Slice(cfg.BotAccess.WhiteListBots)
+	cfg.BotAccess.BlackListBots = normalizeInt64Slice(cfg.BotAccess.BlackListBots)
+	if cfg.BotAccess.DefaultPolicy != "allow" && cfg.BotAccess.DefaultPolicy != "deny" {
+		cfg.BotAccess.DefaultPolicy = "allow"
+		changed = true
+	}
+	if cfg.BotAccess.RejectBehavior != "disconnect" && cfg.BotAccess.RejectBehavior != "ignore" {
+		cfg.BotAccess.RejectBehavior = "disconnect"
+		changed = true
+	}
 	normalizedControls := normalizePluginControls(cfg.PluginControls)
 	if !pluginControlsEqual(cfg.PluginControls, normalizedControls) {
 		cfg.PluginControls = normalizedControls

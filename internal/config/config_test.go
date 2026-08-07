@@ -485,3 +485,63 @@ func TestLoadOrCreateDefaultInitializesPluginEnv(t *testing.T) {
 		t.Fatal("expected PluginEnv to be initialized")
 	}
 }
+
+
+func TestBotAccessControl(t *testing.T) {
+	tests := []struct {
+		name    string
+		ac      BotAccessConfig
+		botID   int64
+		want    bool
+	}{
+		{
+			name:    "empty config - default allow",
+			ac:      BotAccessConfig{},
+			botID:   12345,
+			want:    true,
+		},
+		{
+			name: "explicit whitelist match",
+			ac: BotAccessConfig{
+				WhiteListBots: []int64{12345},
+				BlackListBots: []int64{12345}, // whitelist wins over blacklist
+				DefaultPolicy: "deny",
+			},
+			botID:   12345,
+			want:    true,
+		},
+		{
+			name: "explicit blacklist match",
+			ac: BotAccessConfig{
+				BlackListBots: []int64{12345},
+				DefaultPolicy: "allow",
+			},
+			botID:   12345,
+			want:    false,
+		},
+		{
+			name: "no match default deny",
+			ac: BotAccessConfig{
+				DefaultPolicy: "deny",
+			},
+			botID:   12345,
+			want:    false,
+		},
+		{
+			name: "no match default allow",
+			ac: BotAccessConfig{
+				DefaultPolicy: "allow",
+			},
+			botID:   12345,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ac.Allowed(tt.botID); got != tt.want {
+				t.Errorf("BotAccessConfig.Allowed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
