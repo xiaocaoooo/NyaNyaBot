@@ -58,38 +58,26 @@ type AccessControl struct {
 
 // Allowed returns true if the user and group are allowed based on the rules.
 func (ac AccessControl) Allowed(userID, groupID int64) bool {
-	// 1. Blacklist check (highest priority)
-	for _, id := range ac.BlackListUsers {
-		if id == userID {
-			return false
-		}
-	}
-	if groupID > 0 {
-		for _, id := range ac.BlackListGroups {
-			if id == groupID {
-				return false
-			}
-		}
-	}
-
-	// 2. Whitelist check
-	hasUserWhitelist := len(ac.WhiteListUsers) > 0
-	hasGroupWhitelist := len(ac.WhiteListGroups) > 0
-
-	if !hasUserWhitelist && !hasGroupWhitelist {
-		// Both empty: allow all
-		return true
-	}
-
-	// Mixed mode OR logic: if either user or group is whitelisted, allow.
-	if hasUserWhitelist {
+	// 1. 用户显式白名单 (User Explicit Whitelist)
+	if len(ac.WhiteListUsers) > 0 {
 		for _, id := range ac.WhiteListUsers {
 			if id == userID {
 				return true
 			}
 		}
 	}
-	if hasGroupWhitelist && groupID > 0 {
+
+	// 2. 用户显式黑名单 (User Explicit Blacklist)
+	if len(ac.BlackListUsers) > 0 {
+		for _, id := range ac.BlackListUsers {
+			if id == userID {
+				return false
+			}
+		}
+	}
+
+	// 3. 群显式白名单 (Group Explicit Whitelist)
+	if groupID > 0 && len(ac.WhiteListGroups) > 0 {
 		for _, id := range ac.WhiteListGroups {
 			if id == groupID {
 				return true
@@ -97,8 +85,20 @@ func (ac AccessControl) Allowed(userID, groupID int64) bool {
 		}
 	}
 
-	// Has whitelist but no match
-	return false
+	// 4. 群显式黑名单 (Group Explicit Blacklist)
+	if groupID > 0 && len(ac.BlackListGroups) > 0 {
+		for _, id := range ac.BlackListGroups {
+			if id == groupID {
+				return false
+			}
+		}
+	}
+
+	// 5. 全局默认策略 (Global Default Policy)
+	if len(ac.WhiteListUsers) > 0 || len(ac.WhiteListGroups) > 0 {
+		return false
+	}
+	return true
 }
 
 func (ac AccessControl) IsEmpty() bool {
@@ -492,43 +492,8 @@ func (c AppConfig) IsMessageDedupEnabled() bool {
 }
 
 func (c AppConfig) IsAllowed(pluginID, listenerID string, isCommand bool, userID, groupID int64) bool {
-	// 1) Global level
-	if !c.GlobalAccess.Allowed(userID, groupID) {
-		return false
-	}
-
-	pluginID = strings.TrimSpace(pluginID)
-	if pluginID == "" {
-		return true
-	}
-
-	control, ok := c.PluginControls[pluginID]
-	if !ok {
-		return true
-	}
-
-	// 2) Plugin level
-	if !control.Access.Allowed(userID, groupID) {
-		return false
-	}
-
-	// 3) Listener level (Command or Event)
-	listenerID = strings.TrimSpace(listenerID)
-	if listenerID == "" {
-		return true
-	}
-
-	if isCommand {
-		if ac, ok := control.CommandAccess[listenerID]; ok {
-			return ac.Allowed(userID, groupID)
-		}
-	} else {
-		if ac, ok := control.EventAccess[listenerID]; ok {
-			return ac.Allowed(userID, groupID)
-		}
-	}
-
-	return true
+	// Only use Global level access control. Multilevel (plugin/listener level) whitelists/blacklists are removed.
+	return c.GlobalAccess.Allowed(userID, groupID)
 }
 
 func normalizePluginControls(in map[string]PluginControl) map[string]PluginControl {
