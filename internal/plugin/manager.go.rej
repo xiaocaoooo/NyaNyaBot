@@ -1,0 +1,14 @@
+--- /dev/null
++++ Update File: internal/plugin/manager.go
+@@ -156,6 +156,11 @@
+ func ValidateDescriptor(d Descriptor) (Descriptor, error) {
+ 	d.PluginID = strings.TrimSpace(d.PluginID)
+ 	if d.PluginID == "" {
+ 		return Descriptor{}, errors.New("plugin_id is empty")
+ 	}
++
++	basePluginID := d.PluginID
++	if base, _, hasAt := strings.Cut(d.PluginID, "@"); hasAt {
++		basePluginID = strings.TrimSpace(base)
++	}
+ 

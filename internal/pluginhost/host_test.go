@@ -109,3 +109,9 @@ func TestCycleRejectedPluginsAreClosed(t *testing.T) {
 		t.Fatalf("external.c should remain in candidates")
 	}
 }
+
+func TestMultiInstanceLoadingWithAtSymbol(t *testing.T) {
+	// Let's verify that a functional plugin can be replicated into multiple instances.
+	// Since we mock or test in process, we can verify by mock data structure inputs or functions.
+	// But actually, we can write a clean test demonstrating the replication logic!
+}

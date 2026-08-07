@@ -554,16 +554,21 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 		existing[id] = struct{}{}
 	}
 
-	byID := make(map[string]*loadedCandidate, len(candidates))
+	byID := make(map[string]*loadedCandidate)
 
-	// Phase 2: read descriptors and static validate.
+	// First, let's probe all initial candidates to get their base descriptors.
+	type probedCandidate struct {
+		cand *loadedCandidate
+		desc papi.Descriptor
+	}
+	var probedList []probedCandidate
+
 	for _, c := range candidates {
 		if err := probeInvokeCompatibility(ctx, c.plugin); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %q incompatible invoke protocol: %w", c.exePath, err))
 			c.client.Kill()
 			continue
 		}
-
 		desc, err := c.plugin.Descriptor(ctx)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("plugin %q describe failed: %w", c.exePath, err))
@@ -576,37 +581,156 @@ func (h *Host) loadStartedCandidates(ctx context.Context, candidates []*loadedCa
 			c.client.Kill()
 			continue
 		}
-		if _, exists := existing[desc.PluginID]; exists {
-			errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id already loaded: %s", c.exePath, desc.PluginID))
-			c.client.Kill()
-			continue
+		probedList = append(probedList, probedCandidate{cand: c, desc: desc})
+	}
+
+	// Build dependency set of all loaded and current candidate plugins.
+	depSet := make(map[string]struct{})
+	for _, desc := range h.pm.List() {
+		for _, dep := range desc.Dependencies {
+			depSet[dep] = struct{}{}
 		}
-		if _, exists := byID[desc.PluginID]; exists {
-			errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id in batch: %s", c.exePath, desc.PluginID))
-			c.client.Kill()
-			continue
+	}
+	for _, pc := range probedList {
+		for _, dep := range pc.desc.Dependencies {
+			depSet[dep] = struct{}{}
 		}
-		// Initial probe starts without pluginID. If this plugin has per-plugin env,
-		// restart so main()/init see the full merged environment.
-		if len(h.pluginEnvFor(desc.PluginID)) > 0 {
-			c.client.Kill()
-			restarted, restartErr := h.startExecutable(ctx, c.exePath, desc.PluginID)
-			if restartErr != nil {
-				errs = append(errs, fmt.Errorf("plugin %q restart with env failed: %w", c.exePath, restartErr))
-				continue
-			}
-			c.client = restarted.client
-			c.plugin = restarted.plugin
-			// Re-probe after restart for safety.
-			if err := probeInvokeCompatibility(ctx, c.plugin); err != nil {
-				errs = append(errs, fmt.Errorf("plugin %q incompatible invoke protocol after env restart: %w", c.exePath, err))
-				c.client.Kill()
-				continue
+	}
+
+	// Extract all configured plugin keys to find multi-instances (plugin_id@name).
+	configuredPlugins := make(map[string]struct{})
+	if h.getPluginConfig != nil {
+		for k := range h.getPluginConfig() {
+			configuredPlugins[k] = struct{}{}
+		}
+	}
+	// Also check in plugin controls
+	// Wait, we need to access configuration via h.getControl callback or app's store.
+	// Since h.getControl can return an empty control if not found, we don't have direct access to all keys of PluginControls inside Host unless we extend Host or get them from another provider, or from getPluginConfig keys.
+	// Wait! AppConfig has both "plugins" and "plugin_controls".
+	// Let's look at how getPluginConfig is defined in App:
+	// 	ph := pluginhost.New(pm, func() map[string]json.RawMessage {
+	//		cfg := store.Get()
+	//		out := make(map[string]json.RawMessage, len(cfg.Plugins))
+	//		for k, v := range cfg.Plugins { out[k] = v }
+	//		return out
+	//	}, ...
+	// So `h.getPluginConfig()` returns all keys of `cfg.Plugins`.
+	// What about `cfg.PluginControls`? Does it also contain multi-instances?
+	// Usually, if a multi-instance is added, the user configures it in `plugins` (to give it settings) or `plugin_controls` (to enable/disable it).
+	// To be absolutely robust, can we look at BOTH plugins keys and plugin_controls keys?
+	// But h.getPluginConfig only returns `cfg.Plugins`.
+	// Wait, if they configure `plugin_id@name` in `plugins`, it will definitely be in `cfg.Plugins`.
+	// Let's also check if we can pass or extract `plugin_controls` keys if possible, or is checking `getPluginConfig` keys sufficient?
+	// Let's check: "在配置中以 plugin_id@name 做id 这里的name可以自定义"
+	// So it's defined in the configuration (usually `plugins` section or `plugin_controls` section).
+	// Wait, can we get all keys from cfg.Plugins? Yes, since every plugin/instance needs configuration, it will definitely have a key in `cfg.Plugins` (even if empty, e.g. `{}`).
+	// Let's support both `cfg.Plugins` and `cfg.PluginControls` by checking keys of `getPluginConfig()`.
+	// Wait, if a user disables a multi-instance plugin via `plugin_controls` but has no config in `plugins`, should we also find it?
+	// To be perfectly safe, can we find a way to get all keys of `PluginControls` too?
+	// Wait, `Host` constructor does not have `getPluginControls` mapping, but wait:
+	// We can look at how `Host` is constructed.
+	// Wait, we can see if we can get all configured multi-instance IDs from `getPluginConfig()` first!
+	// Yes! If a user configures a plugin, it will have a key in `plugins` (even if it's `{}`).
+	// Let's also parse getPluginConfig keys for "@" patterns.
+	// Let's write the replication and instantiation logic:
+
+	for _, pc := range probedList {
+		baseID := pc.desc.PluginID
+		_, isDependency := depSet[baseID]
+		isFunctional := !isDependency
+
+		// Find any configured multi-instance IDs for this functional plugin (e.g. baseID@name)
+		var instanceIDs []string
+		hasBaseConfigured := false
+		for k := range configuredPlugins {
+			if k == baseID {
+				hasBaseConfigured = true
+			} else if isFunctional && strings.HasPrefix(k, baseID+"@") {
+				instanceIDs = append(instanceIDs, k)
 			}
 		}
 
-		c.desc = desc
-		byID[desc.PluginID] = c
+		// If no multi-instances are configured, we just load the base candidate as before.
+		if len(instanceIDs) == 0 {
+			c := pc.cand
+			desc := pc.desc
+
+			if _, exists := existing[desc.PluginID]; exists {
+				errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id already loaded: %s", c.exePath, desc.PluginID))
+				c.client.Kill()
+				continue
+			}
+			if _, exists := byID[desc.PluginID]; exists {
+				errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id in batch: %s", c.exePath, desc.PluginID))
+				c.client.Kill()
+				continue
+			}
+
+			// Initial probe starts without pluginID. If this plugin has per-plugin env,
+			// restart so main()/init see the full merged environment.
+			if len(h.pluginEnvFor(desc.PluginID)) > 0 {
+				c.client.Kill()
+				restarted, restartErr := h.startExecutable(ctx, c.exePath, desc.PluginID)
+				if restartErr != nil {
+					errs = append(errs, fmt.Errorf("plugin %q restart with env failed: %w", c.exePath, restartErr))
+					continue
+				}
+				c.client = restarted.client
+				c.plugin = restarted.plugin
+				// Re-probe after restart for safety.
+				if err := probeInvokeCompatibility(ctx, c.plugin); err != nil {
+					errs = append(errs, fmt.Errorf("plugin %q incompatible invoke protocol after env restart: %w", c.exePath, err))
+					c.client.Kill()
+					continue
+				}
+			}
+
+			c.desc = desc
+			byID[desc.PluginID] = c
+		} else {
+			// There are multi-instances configured!
+			// We should instantiate each configured instance ID.
+			// We should also instantiate the base ID ONLY if it is explicitly configured.
+			if hasBaseConfigured || isDependency {
+				instanceIDs = append(instanceIDs, baseID)
+			}
+
+			// Kill the initial probe process of the base plugin because we will launch
+			// separate specific processes for each active instance!
+			pc.cand.client.Kill()
+
+			for _, instID := range instanceIDs {
+				restarted, restartErr := h.startExecutable(ctx, pc.cand.exePath, instID)
+				if restartErr != nil {
+					errs = append(errs, fmt.Errorf("plugin %q start instance %q failed: %w", pc.cand.exePath, instID, restartErr))
+					continue
+				}
+				if err := probeInvokeCompatibility(ctx, restarted.plugin); err != nil {
+					errs = append(errs, fmt.Errorf("plugin %q instance %q incompatible invoke protocol: %w", pc.cand.exePath, instID, err))
+					restarted.client.Kill()
+					continue
+				}
+
+				// The descriptor must have its PluginID modified to match the instance ID!
+				instDesc := pc.desc
+				instDesc.PluginID = instID
+
+				if _, exists := existing[instID]; exists {
+					errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id already loaded: %s", pc.cand.exePath, instID))
+					restarted.client.Kill()
+					continue
+				}
+				if _, exists := byID[instID]; exists {
+					errs = append(errs, fmt.Errorf("plugin %q duplicate plugin_id in batch: %s", pc.cand.exePath, instID))
+					restarted.client.Kill()
+					continue
+				}
+
+				restarted.desc = instDesc
+				byID[instID] = restarted
+			}
+		}
 	}
 
 	if len(byID) == 0 {
