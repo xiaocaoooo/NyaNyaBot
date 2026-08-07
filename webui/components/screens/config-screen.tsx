@@ -53,6 +53,10 @@ export function ConfigScreen() {
   const [blacklistUsers, setBlacklistUsers] = useState("");
   const [whitelistGroups, setWhitelistGroups] = useState("");
   const [blacklistGroups, setBlacklistGroups] = useState("");
+  const [whitelistBots, setWhitelistBots] = useState("");
+  const [blacklistBots, setBlacklistBots] = useState("");
+  const [defaultBotPolicy, setDefaultBotPolicy] = useState<'allow' | 'deny'>("allow");
+  const [botRejectBehavior, setBotRejectBehavior] = useState<'disconnect' | 'ignore'>("disconnect");
 
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -95,6 +99,10 @@ export function ConfigScreen() {
       setBlacklistUsers(configRes.global_access?.blacklist_users?.join("\n") ?? "");
       setWhitelistGroups(configRes.global_access?.whitelist_groups?.join("\n") ?? "");
       setBlacklistGroups(configRes.global_access?.blacklist_groups?.join("\n") ?? "");
+      setWhitelistBots(configRes.bot_access?.whitelist_bots?.join("\n") ?? "");
+      setBlacklistBots(configRes.bot_access?.blacklist_bots?.join("\n") ?? "");
+      setDefaultBotPolicy(configRes.bot_access?.default_policy ?? "allow");
+      setBotRejectBehavior(configRes.bot_access?.reject_behavior ?? "disconnect");
 
       const rows = Object.entries(globalsRes.globals ?? {}).map(([key, value]) => ({
         id: Math.random().toString(36).slice(2),
@@ -306,8 +314,16 @@ export function ConfigScreen() {
         blacklist_groups: parseIds(blacklistGroups),
       };
 
+      const bot_access = {
+        whitelist_bots: parseIds(whitelistBots),
+        blacklist_bots: parseIds(blacklistBots),
+        default_policy: defaultBotPolicy,
+        reject_behavior: botRejectBehavior,
+      };
+
       await apiClient.updateConfig({
         global_access,
+        bot_access,
       });
       setStatus(t("config.statusSaveAccessControl"));
     } catch (err) {
@@ -465,6 +481,14 @@ export function ConfigScreen() {
               setWhitelistGroups={setWhitelistGroups}
               blacklistGroups={blacklistGroups}
               setBlacklistGroups={setBlacklistGroups}
+              whitelistBots={whitelistBots}
+              setWhitelistBots={setWhitelistBots}
+              blacklistBots={blacklistBots}
+              setBlacklistBots={setBlacklistBots}
+              defaultBotPolicy={defaultBotPolicy}
+              setDefaultBotPolicy={setDefaultBotPolicy}
+              botRejectBehavior={botRejectBehavior}
+              setBotRejectBehavior={setBotRejectBehavior}
             />
           </AppCardBody>
           <AppCardFooter>

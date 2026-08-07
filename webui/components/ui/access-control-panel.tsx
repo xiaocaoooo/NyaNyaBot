@@ -175,13 +175,25 @@ export interface AccessControlPanelProps {
   setWhitelistGroups: (v: string) => void;
   blacklistGroups: string;
   setBlacklistGroups: (v: string) => void;
+  whitelistBots?: string;
+  setWhitelistBots?: (v: string) => void;
+  blacklistBots?: string;
+  setBlacklistBots?: (v: string) => void;
+  defaultBotPolicy?: 'allow' | 'deny';
+  setDefaultBotPolicy?: (v: 'allow' | 'deny') => void;
+  botRejectBehavior?: 'disconnect' | 'ignore';
+  setBotRejectBehavior?: (v: 'disconnect' | 'ignore') => void;
 }
 
 export function AccessControlPanel({
   whitelistUsers, setWhitelistUsers,
   blacklistUsers, setBlacklistUsers,
   whitelistGroups, setWhitelistGroups,
-  blacklistGroups, setBlacklistGroups
+  blacklistGroups, setBlacklistGroups,
+  whitelistBots = "", setWhitelistBots,
+  blacklistBots = "", setBlacklistBots,
+  defaultBotPolicy = "allow", setDefaultBotPolicy,
+  botRejectBehavior = "disconnect", setBotRejectBehavior
 }: AccessControlPanelProps) {
   const { t } = useI18n();
 
@@ -234,6 +246,62 @@ export function AccessControlPanel({
           />
         </div>
       </Tab>
+      {setWhitelistBots && setBlacklistBots && (
+        <Tab key="bot" title={t("config.accessControlBotTab")}>
+          <div className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <AccessControlSection
+                type="whitelist"
+                isUser={true}
+                title={t("config.whitelistBotsTitle")}
+                description={t("config.accessControlBotDesc")}
+                value={whitelistBots}
+                onValueChange={setWhitelistBots}
+              />
+              <AccessControlSection
+                type="blacklist"
+                isUser={true}
+                title={t("config.blacklistBotsTitle")}
+                description={t("config.accessControlBotDesc")}
+                value={blacklistBots}
+                onValueChange={setBlacklistBots}
+              />
+            </div>
+            
+            <div className="grid gap-6 rounded-xl border border-border/40 bg-surface/30 p-4 sm:grid-cols-2">
+              {setDefaultBotPolicy && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-text">{t("config.defaultBotPolicyLabel")}</label>
+                  <p className="text-[10px] text-muted leading-tight">{t("config.defaultBotPolicyDesc")}</p>
+                  <select
+                    className="mt-2 w-full rounded-md border border-border/70 bg-surface px-3 py-1.5 text-xs text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    value={defaultBotPolicy}
+                    onChange={(e) => setDefaultBotPolicy(e.target.value as "allow" | "deny")}
+                  >
+                    <option value="allow">{t("config.policyAllow")}</option>
+                    <option value="deny">{t("config.policyDeny")}</option>
+                  </select>
+                </div>
+              )}
+
+              {setBotRejectBehavior && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-text">{t("config.botRejectBehaviorLabel")}</label>
+                  <p className="text-[10px] text-muted leading-tight">{t("config.botRejectBehaviorDesc")}</p>
+                  <select
+                    className="mt-2 w-full rounded-md border border-border/70 bg-surface px-3 py-1.5 text-xs text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    value={botRejectBehavior}
+                    onChange={(e) => setBotRejectBehavior(e.target.value as "disconnect" | "ignore")}
+                  >
+                    <option value="disconnect">{t("config.behaviorDisconnect")}</option>
+                    <option value="ignore">{t("config.behaviorIgnore")}</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+        </Tab>
+      )}
     </Tabs>
   );
 }

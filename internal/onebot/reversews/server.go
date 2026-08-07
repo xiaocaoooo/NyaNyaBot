@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaocaoooo/nyanyabot/internal/onebot/ob11"
+	"github.com/xiaocaoooo/nyanyabot/internal/config"
 	"github.com/xiaocaoooo/nyanyabot/internal/stats"
 	"nhooyr.io/websocket"
 )
@@ -40,6 +41,8 @@ type Server struct {
 	mu       sync.RWMutex
 	sessions map[int64]*session
 	stats    *stats.Stats
+
+	configProvider func() config.AppConfig
 }
 
 // BotInfo contains information about a connected bot.
@@ -82,6 +85,10 @@ func New(addr string, logger *slog.Logger) *Server {
 		logger:   logger,
 		sessions: make(map[int64]*session),
 	}
+}
+
+func (s *Server) SetConfigProvider(fn func() config.AppConfig) {
+	s.configProvider = fn
 }
 
 func (s *Server) SetEventHandler(h EventHandler) {
@@ -219,6 +226,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sess.nickname = loginData.Nickname
 
 	s.logger.Info("bot identified", "self_id", sess.selfID, "nickname", sess.nickname, "remote", r.RemoteAddr)
+
+	// Check bot access control
+	if s.configProvider != nil {
+		cfg := s.configProvider()
+		if !cfg.BotAccess.Allowed(sess.selfID) {
+			s.logger.Warn("bot connection rejected by access control", "self_id", sess.selfID, "nickname", sess.nickname, "remote", r.RemoteAddr, "reject_behavior", cfg.BotAccess.RejectBehavior)
+			cancelReadLoop()
+			<-readLoopDone
+			if cfg.BotAccess.RejectBehavior == "ignore" {
+				// Keep connection alive but do nothing
+				<-ctx.Done()
+				return
+			}
+			// default to disconnect
+			_ = c.Close(websocket.StatusPolicyViolation, "bot access denied")
+			return
+		}
+	}
 
 	// Get group list.
 	// Note: This call also uses the session directly (not via sessions map),

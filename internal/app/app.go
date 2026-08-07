@@ -145,6 +145,7 @@ func New(ctx context.Context, logger *slog.Logger) (*App, error) {
 
 	ob := reversews.New(cfg.OneBot.ReverseWS.ListenAddr, logger)
 	ob.SetStats(st)
+	ob.SetConfigProvider(store.Get)
 
 	// 设置 Bot ID 提供者（用于过滤所有 Bot 的消息）
 	disp.SetBotIDProvider(ob)

@@ -907,6 +907,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				BatchSize     *int    `json:"batch_size"`
 				BatchInterval *string `json:"batch_interval"`
 			} `json:"trigger_log"`
+			BotAccess *struct {
+				WhiteListBots  *[]int64 `json:"whitelist_bots"`
+				BlackListBots  *[]int64 `json:"blacklist_bots"`
+				DefaultPolicy  *string  `json:"default_policy"`
+				RejectBehavior *string  `json:"reject_behavior"`
+			} `json:"bot_access"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -957,6 +963,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				}
 				if patch.TriggerLog.BatchInterval != nil {
 					c.TriggerLog.BatchInterval = strings.TrimSpace(*patch.TriggerLog.BatchInterval)
+				}
+			}
+			if patch.BotAccess != nil {
+				if patch.BotAccess.WhiteListBots != nil {
+					c.BotAccess.WhiteListBots = *patch.BotAccess.WhiteListBots
+				}
+				if patch.BotAccess.BlackListBots != nil {
+					c.BotAccess.BlackListBots = *patch.BotAccess.BlackListBots
+				}
+				if patch.BotAccess.DefaultPolicy != nil {
+					c.BotAccess.DefaultPolicy = strings.TrimSpace(*patch.BotAccess.DefaultPolicy)
+				}
+				if patch.BotAccess.RejectBehavior != nil {
+					c.BotAccess.RejectBehavior = strings.TrimSpace(*patch.BotAccess.RejectBehavior)
 				}
 			}
 		})
