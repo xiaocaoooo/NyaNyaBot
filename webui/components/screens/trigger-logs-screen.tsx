@@ -176,7 +176,13 @@ export function TriggerLogsScreen() {
     }
   }, [query, groupId, userId, pluginId, listenerId, startTime, endTime, messageSeq, listenerType, t]);
 
-  useAutoRefresh(useCallback(() => fetchData(true), [fetchData]));
+  useAutoRefresh(useCallback(() => {
+    // 如果有任何一个过滤项非空，说明用户处于搜索输入状态中，不要执行定时自动刷新
+    if (groupId || userId || pluginId || listenerId || startTime || endTime || messageSeq || listenerType) {
+      return;
+    }
+    void fetchData(true);
+  }, [fetchData, groupId, userId, pluginId, listenerId, startTime, endTime, messageSeq, listenerType]));
 
   useEffect(() => {
     void fetchData();
