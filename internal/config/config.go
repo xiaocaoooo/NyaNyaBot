@@ -169,7 +169,10 @@ type PluginControl struct {
 }
 
 func (pc PluginControl) IsEmpty() bool {
-	if pc.Enabled != nil && !*pc.Enabled || len(pc.DisabledCommands) > 0 || len(pc.DisabledEvents) > 0 || len(pc.DisabledCrons) > 0 {
+	if pc.Enabled != nil {
+		return false
+	}
+	if len(pc.DisabledCommands) > 0 || len(pc.DisabledEvents) > 0 || len(pc.DisabledCrons) > 0 {
 		return false
 	}
 	if !pc.Access.IsEmpty() || len(pc.CommandAccess) > 0 || len(pc.EventAccess) > 0 {

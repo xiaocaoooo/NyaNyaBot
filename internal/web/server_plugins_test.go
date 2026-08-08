@@ -372,3 +372,39 @@ func TestHandlePluginSwitchesEnvRestartsPlugin(t *testing.T) {
 		t.Fatalf("expected env in state, got %#v", items)
 	}
 }
+
+func TestHandlePluginSwitchesCanEnablePlugin(t *testing.T) {
+	handler, store := newPluginTestHandler(t, &webStubPlugin{desc: plugin.Descriptor{
+		PluginID: "external.demo",
+		Name:     "Demo",
+	}})
+	session := loginTestSession(t, handler, store)
+
+	// Default is disabled under opt-in model.
+	if store.Get().IsPluginEnabled("external.demo") {
+		t.Fatal("expected plugin disabled by default")
+	}
+
+	body := bytes.NewBufferString(`{"enabled":true}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/plugins/external.demo/switches", body)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d (%s)", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		OK    bool            `json:"ok"`
+		State pluginStateView `json:"state"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !response.OK || !response.State.Enabled {
+		t.Fatalf("expected enabled=true response, got %#v", response)
+	}
+	if !store.Get().IsPluginEnabled("external.demo") {
+		t.Fatalf("expected enabled persisted, controls=%#v", store.Get().PluginControls)
+	}
+}

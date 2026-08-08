@@ -501,3 +501,48 @@ func TestBotAccessControl(t *testing.T) {
 		})
 	}
 }
+func TestPluginControlIsEmptyKeepsEnabledTrue(t *testing.T) {
+	enabled := true
+	control := PluginControl{Enabled: &enabled}
+	if control.IsEmpty() {
+		t.Fatal("expected enabled=true plugin control to be kept")
+	}
+}
+
+func TestStoreUpdatePersistsEnabledTrue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.LoadOrCreateDefault(); err != nil {
+		t.Fatalf("load default: %v", err)
+	}
+
+	enabled := true
+	updated, err := store.Update(func(c *AppConfig) {
+		if c.PluginControls == nil {
+			c.PluginControls = map[string]PluginControl{}
+		}
+		c.PluginControls["external.amiabot-pjsk-account"] = PluginControl{Enabled: &enabled}
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !updated.IsPluginEnabled("external.amiabot-pjsk-account") {
+		t.Fatalf("expected plugin enabled after update, controls=%#v", updated.PluginControls)
+	}
+
+	// Reload from disk to ensure normalize/save kept enabled=true.
+	store2, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	cfg, err := store2.LoadOrCreateDefault()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !cfg.IsPluginEnabled("external.amiabot-pjsk-account") {
+		t.Fatalf("expected enabled=true persisted, controls=%#v", cfg.PluginControls)
+	}
+}
