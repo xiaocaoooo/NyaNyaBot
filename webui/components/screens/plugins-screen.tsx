@@ -2,7 +2,7 @@
 
 import { Chip, Divider, Spinner, Switch, Tab, Tabs, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from "@heroui/react";
 import { Plus, RefreshCw, Save, Shield, RotateCcw, Trash2 } from "lucide-react";
-import { type Key, useCallback, useEffect, useMemo, useState } from "react";
+import { type Key, useCallback, useEffect, useMemo, useState, useRef } from "react";
 
 import { AppButton } from "@/components/ui/button";
 import { type TranslateFn, useI18n } from "@/components/providers/i18n-provider";
@@ -473,6 +473,8 @@ export function PluginsScreen() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingSwitches, setSavingSwitches] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const lastSelectedIdRef = useRef<string>("");
+  const lastSyncIdRef = useRef<string>("");
 
 
   const [error, setError] = useState<string | null>(null);
@@ -496,6 +498,11 @@ export function PluginsScreen() {
   // Keep local state in sync with selected plugin's state from API
   useEffect(() => {
     if (selectedPlugin) {
+      if (selectedPluginId === lastSyncIdRef.current) {
+        // 同一个插件，只在定时刷新中，跳过重置本地表单 state，避免用户输入被覆盖
+        return;
+      }
+      lastSyncIdRef.current = selectedPluginId;
       setPluginPrefix(selectedPlugin.state.command_prefix ?? "");
       setEnableSleep(selectedPlugin.state.enable_sleep ?? true);
       setSleepTimeout(String(selectedPlugin.state.sleep_timeout ?? 60));
@@ -506,12 +513,13 @@ export function PluginsScreen() {
       }));
       setEnvRows(rows.length > 0 ? rows : [{ id: Math.random().toString(36).slice(2), key: "", value: "" }]);
     } else {
+      lastSyncIdRef.current = "";
       setPluginPrefix("");
       setEnableSleep(true);
       setSleepTimeout("60");
       setEnvRows([{ id: Math.random().toString(36).slice(2), key: "", value: "" }]);
     }
-  }, [selectedPlugin]);
+  }, [selectedPlugin, selectedPluginId]);
 
   const loadPlugins = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -569,14 +577,22 @@ export function PluginsScreen() {
   }, [canUseSchemaEditor, t, isDirty, selectedPluginId]);
 
   useEffect(() => {
-    setIsDirty(false);
     if (!selectedPluginConfig) {
+      setIsDirty(false);
+      lastSelectedIdRef.current = "";
       setSchemaConfig({});
       setPluginConfigText("{}");
       setEditorMode("json");
       return;
     }
 
+    if (selectedPluginId === lastSelectedIdRef.current) {
+      // 插件未切换（定时轮询更新），跳过 loadPluginConfig 避免触发 loadingConfig 闪烁
+      return;
+    }
+
+    setIsDirty(false);
+    lastSelectedIdRef.current = selectedPluginId;
     void loadPluginConfig(selectedPluginId, selectedPluginConfig);
   }, [loadPluginConfig, selectedPluginConfig, selectedPluginId]);
 
@@ -594,6 +610,8 @@ export function PluginsScreen() {
 
       try {
         const response = await apiClient.updatePluginSwitches(pluginId, payload);
+        // 保存成功，清空 lastSyncIdRef 强制下一轮 useEffect 同步权威最新状态
+        lastSyncIdRef.current = "";
         updateLocalPluginState(pluginId, response.state);
         setSwitchStatus(t("plugins.switchStatusSaved"));
         return true;
