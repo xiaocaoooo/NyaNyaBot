@@ -81,6 +81,38 @@ impl App {
             Some(onebot.clone()),
         );
 
+        // Chatlog group_name enrichment via OneBot get_group_info (Go group_cache parity).
+        {
+            let ob = onebot.clone();
+            let chat_fetch = chat.clone();
+            tokio::spawn(async move {
+                chat_fetch
+                    .set_group_name_fetcher(std::sync::Arc::new(
+                        move |group_id: i64, self_id: i64| {
+                            let ob = ob.clone();
+                            Box::pin(async move {
+                                let resp = if self_id != 0 {
+                                    ob.call_with_bot(
+                                    self_id,
+                                    "get_group_info",
+                                    serde_json::json!({"group_id": group_id, "no_cache": false}),
+                                )
+                                .await?
+                                } else {
+                                    ob.call(
+                                    "get_group_info",
+                                    serde_json::json!({"group_id": group_id, "no_cache": false}),
+                                )
+                                .await?
+                                };
+                                Ok(crate::chatlog::group_name_from_api(&resp))
+                            })
+                        },
+                    ))
+                    .await;
+            });
+        }
+
         let disp = dispatcher.clone();
         let chat2 = chat.clone();
         onebot.set_handler(move |event: Value| {

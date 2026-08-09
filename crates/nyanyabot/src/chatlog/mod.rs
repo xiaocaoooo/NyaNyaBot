@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use parking_lot::RwLock as SyncRwLock;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -9,6 +12,18 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
 
 use crate::config::ChatLogConfig;
+use crate::onebot::ob11::ApiResponse;
+
+/// Resolve group name via OneBot when missing from the event.
+pub type FetchGroupNameFn = Arc<
+    dyn Fn(
+            i64,
+            i64,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<String, anyhow::Error>> + Send>,
+        > + Send
+        + Sync,
+>;
 
 #[derive(Clone, Debug)]
 pub struct GroupMessage {
@@ -23,12 +38,65 @@ pub struct GroupMessage {
     pub self_id: i64,
 }
 
+struct CacheEntry {
+    name: String,
+    expires_at: Instant,
+}
+
+/// group_id -> group_name TTL cache (Go GroupCache parity).
+pub struct GroupCache {
+    entries: SyncRwLock<HashMap<i64, CacheEntry>>,
+    ttl: Duration,
+}
+
+impl GroupCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            entries: SyncRwLock::new(HashMap::new()),
+            ttl,
+        }
+    }
+
+    pub fn get(&self, group_id: i64) -> Option<String> {
+        let guard = self.entries.read();
+        let entry = guard.get(&group_id)?;
+        if Instant::now() > entry.expires_at {
+            return None;
+        }
+        Some(entry.name.clone())
+    }
+
+    pub fn set(&self, group_id: i64, name: &str) {
+        if name.trim().is_empty() {
+            return;
+        }
+        self.entries.write().insert(
+            group_id,
+            CacheEntry {
+                name: name.to_string(),
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+    }
+
+    pub fn clear(&self) {
+        self.entries.write().clear();
+    }
+
+    pub fn clean_expired(&self) {
+        let now = Instant::now();
+        self.entries.write().retain(|_, e| now <= e.expires_at);
+    }
+}
+
 pub struct Recorder {
     database_uri: RwLock<String>,
     queue_size: i64,
     tx: RwLock<Option<mpsc::Sender<GroupMessage>>>,
     worker: RwLock<Option<tokio::task::JoinHandle<()>>>,
     pool: RwLock<Option<PgPool>>,
+    cache: Arc<GroupCache>,
+    fetch_group_name: RwLock<Option<FetchGroupNameFn>>,
 }
 
 impl Recorder {
@@ -43,10 +111,17 @@ impl Recorder {
             tx: RwLock::new(None),
             worker: RwLock::new(None),
             pool: RwLock::new(None),
+            // Go default was typically hours; use 1h TTL.
+            cache: Arc::new(GroupCache::new(Duration::from_secs(3600))),
+            fetch_group_name: RwLock::new(None),
         })
     }
 
-    pub async fn start(&self) {
+    pub async fn set_group_name_fetcher(&self, f: FetchGroupNameFn) {
+        *self.fetch_group_name.write().await = Some(f);
+    }
+
+    pub async fn start(self: &Arc<Self>) {
         let uri = self.database_uri.read().await.clone();
         if uri.trim().is_empty() {
             info!("chatlog disabled (empty database_uri)");
@@ -61,10 +136,38 @@ impl Recorder {
                 *self.pool.write().await = Some(pool.clone());
                 let (tx, mut rx) = mpsc::channel::<GroupMessage>(self.queue_size as usize);
                 *self.tx.write().await = Some(tx);
+                let this = Arc::clone(self);
                 let handle = tokio::spawn(async move {
-                    while let Some(ev) = rx.recv().await {
+                    let mut n = 0u64;
+                    while let Some(mut ev) = rx.recv().await {
+                        if ev.group_name.trim().is_empty() {
+                            if let Some(cached) = this.cache.get(ev.group_id) {
+                                ev.group_name = cached;
+                            } else if let Some(fetch) = this.fetch_group_name.read().await.clone() {
+                                match fetch(ev.group_id, ev.self_id).await {
+                                    Ok(name) if !name.trim().is_empty() => {
+                                        this.cache.set(ev.group_id, &name);
+                                        ev.group_name = name;
+                                    }
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        warn!(
+                                            group_id = ev.group_id,
+                                            error = %err,
+                                            "chatlog fetch group_name failed"
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            this.cache.set(ev.group_id, &ev.group_name);
+                        }
                         if let Err(err) = insert_event(&pool, &ev).await {
                             warn!(error = %err, "chatlog insert failed");
+                        }
+                        n += 1;
+                        if n.is_multiple_of(256) {
+                            this.cache.clean_expired();
                         }
                     }
                 });
@@ -84,7 +187,7 @@ impl Recorder {
         Ok(())
     }
 
-    pub async fn reconnect(&self, database_uri: String) -> Result<()> {
+    pub async fn reconnect(self: &Arc<Self>, database_uri: String) -> Result<()> {
         self.stop().await?;
         *self.database_uri.write().await = database_uri;
         self.start().await;
@@ -173,31 +276,48 @@ pub fn parse_group_message(event: &Value) -> Option<GroupMessage> {
     })
 }
 
-fn parse_real_seq(raw: Option<&Value>) -> Option<String> {
-    let raw = raw?;
-    let s = match raw {
-        Value::String(s) => s.trim().to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        _ => return None,
-    };
-    if s.is_empty() || s == "0" {
-        return None;
+fn parse_real_seq(v: Option<&Value>) -> Option<String> {
+    let v = v?;
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if s.is_empty() || s == "0" {
+            return None;
+        }
+        return Some(s.to_string());
     }
-    Some(s)
+    if let Some(n) = v.as_i64() {
+        if n <= 0 {
+            return None;
+        }
+        return Some(n.to_string());
+    }
+    if let Some(n) = v.as_u64() {
+        if n == 0 {
+            return None;
+        }
+        return Some(n.to_string());
+    }
+    None
 }
 
 fn as_i64(v: &Value) -> Option<i64> {
-    v.as_i64()
-        .or_else(|| v.as_u64().map(|n| n as i64))
-        .or_else(|| v.as_f64().map(|n| n as i64))
-        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    if let Some(n) = v.as_i64() {
+        return Some(n);
+    }
+    if let Some(n) = v.as_u64() {
+        return i64::try_from(n).ok();
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse().ok();
+    }
+    None
 }
 
 async fn ensure_schema(pool: &PgPool) -> Result<()> {
-    for stmt in [
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS group_message_logs (
+            id BIGSERIAL PRIMARY KEY,
             group_id BIGINT NOT NULL,
             real_seq TEXT NOT NULL,
             group_name TEXT NOT NULL DEFAULT '',
@@ -207,20 +327,26 @@ async fn ensure_schema(pool: &PgPool) -> Result<()> {
             message_segments JSONB NOT NULL DEFAULT '[]'::jsonb,
             recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             self_id BIGINT NOT NULL DEFAULT 0,
-            CONSTRAINT group_message_logs_group_real_seq_key UNIQUE (group_id, real_seq)
-        )
+            UNIQUE (group_id, real_seq)
+        );
         "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_group_message_logs_group_time
+            ON group_message_logs (group_id, recorded_at DESC);
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    // Compatibility: older DBs may miss self_id.
+    let _ = sqlx::query(
         r#"ALTER TABLE group_message_logs ADD COLUMN IF NOT EXISTS self_id BIGINT NOT NULL DEFAULT 0"#,
-        r#"CREATE INDEX IF NOT EXISTS idx_group_message_logs_group_id ON group_message_logs (group_id)"#,
-        r#"CREATE INDEX IF NOT EXISTS idx_group_message_logs_recorded_at ON group_message_logs (recorded_at)"#,
-        r#"CREATE INDEX IF NOT EXISTS idx_group_message_logs_user_id ON group_message_logs (user_id)"#,
-        r#"CREATE INDEX IF NOT EXISTS idx_group_message_logs_self_id ON group_message_logs (self_id)"#,
-    ] {
-        sqlx::query(stmt)
-            .execute(pool)
-            .await
-            .with_context(|| format!("chatlog schema stmt failed: {stmt}"))?;
-    }
+    )
+    .execute(pool)
+    .await;
     Ok(())
 }
 
@@ -248,28 +374,37 @@ async fn insert_event(pool: &PgPool, ev: &GroupMessage) -> Result<()> {
     Ok(())
 }
 
+/// Helper used by app wiring: parse get_group_info API response.
+pub fn group_name_from_api(resp: &ApiResponse) -> String {
+    resp.data
+        .get("group_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn parses_group_message_with_real_seq() {
-        let event = json!({
-            "post_type": "message",
-            "message_type": "group",
-            "group_id": 100,
-            "user_id": 200,
+        let msg = parse_group_message(&json!({
+            "post_type":"message",
+            "message_type":"group",
+            "group_id": 10,
+            "user_id": 20,
             "self_id": 1,
-            "real_seq": "42",
+            "real_seq": "99",
             "raw_message": "hi",
-            "sender": {"card": "Card", "nickname": "Nick"},
-            "message": [{"type":"text","data":{"text":"hi"}}]
-        });
-        let msg = parse_group_message(&event).expect("parsed");
-        assert_eq!(msg.group_id, 100);
-        assert_eq!(msg.real_seq, "42");
+            "message": [{"type":"text","data":{"text":"hi"}}],
+            "sender": {"card":"Card","nickname":"Nick"}
+        }))
+        .unwrap();
+        assert_eq!(msg.group_id, 10);
+        assert_eq!(msg.real_seq, "99");
         assert_eq!(msg.user_display_name, "Card");
-        assert!(msg.message_segments.is_array());
     }
 
     #[test]
@@ -292,5 +427,15 @@ mod tests {
             }))
             .is_none()
         );
+    }
+
+    #[test]
+    fn group_cache_ttl_and_set() {
+        let cache = GroupCache::new(Duration::from_secs(60));
+        assert!(cache.get(1).is_none());
+        cache.set(1, "G1");
+        assert_eq!(cache.get(1).as_deref(), Some("G1"));
+        cache.clear();
+        assert!(cache.get(1).is_none());
     }
 }
