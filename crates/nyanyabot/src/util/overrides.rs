@@ -105,4 +105,13 @@ mod tests {
         assert_eq!(info.command_id, "cmd.echo");
         assert_eq!(info.groups.get("content").unwrap(), "hi");
     }
+
+    #[test]
+    fn named_capture_replacement_go_parity() {
+        let rules = vec![OverrideRule {
+            pattern: r"^看看我的(?P<server>cn|jp|tw|en|kr)id是什么$".into(),
+            replacement: "${server}id".into(),
+        }];
+        assert_eq!(apply_overrides("看看我的cnid是什么", &rules), "cnid");
+    }
 }
