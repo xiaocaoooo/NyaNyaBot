@@ -222,10 +222,8 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
 
             let mut event = probe;
             if identified != 0 {
-                if event.get("self_id").and_then(|v| v.as_i64()).unwrap_or(0) == 0 {
-                    event["self_id"] = json!(identified);
-                }
-            } else if let Some(id) = event.get("self_id").and_then(|v| v.as_i64()) {
+                event = ensure_self_id(event, identified);
+            } else if let Some(id) = event_self_id(&event) {
                 identified = id;
             }
             if let Some(handler) = server_bg.handler.read().clone() {
@@ -243,11 +241,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
             return;
         }
     };
-    let user_id = login
-        .data
-        .get("user_id")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let user_id = json_i64(&login.data, "user_id");
     let nickname = login
         .data
         .get("nickname")
@@ -280,17 +274,14 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     {
         for g in arr {
             groups.push(Group {
-                group_id: g.get("group_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                group_id: json_i64(g, "group_id"),
                 group_name: g
                     .get("group_name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
-                member_count: g.get("member_count").and_then(|v| v.as_i64()).unwrap_or(0),
-                max_member_count: g
-                    .get("max_member_count")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0),
+                member_count: json_i64(g, "member_count"),
+                max_member_count: json_i64(g, "max_member_count"),
             });
         }
     }
@@ -346,5 +337,53 @@ async fn call_raw(session: &Session, action: &str, params: Value) -> Result<ApiR
             session.pending.lock().await.remove(&echo);
             bail!("timeout")
         }
+    }
+}
+
+fn json_i64(v: &Value, key: &str) -> i64 {
+    v.get(key).map(value_as_i64).unwrap_or(0)
+}
+
+fn value_as_i64(v: &Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_u64().map(|n| n as i64))
+        .or_else(|| v.as_f64().map(|n| n as i64))
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        .unwrap_or(0)
+}
+
+fn event_self_id(event: &Value) -> Option<i64> {
+    let n = json_i64(event, "self_id");
+    if n == 0 { None } else { Some(n) }
+}
+
+/// Apply Go ensureSelfID: when connection is identified, always overwrite self_id.
+fn ensure_self_id(mut event: Value, self_id: i64) -> Value {
+    if self_id != 0
+        && let Some(obj) = event.as_object_mut()
+    {
+        obj.insert("self_id".into(), json!(self_id));
+    }
+    event
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_string_ids() {
+        assert_eq!(json_i64(&json!({"user_id": "12345"}), "user_id"), 12345);
+        assert_eq!(json_i64(&json!({"group_id": 9}), "group_id"), 9);
+        assert_eq!(event_self_id(&json!({"self_id": "42"})), Some(42));
+        assert_eq!(event_self_id(&json!({"self_id": 0})), None);
+    }
+
+    #[test]
+    fn ensure_self_id_overwrites_nonzero() {
+        let ev = ensure_self_id(json!({"self_id": 1, "post_type": "message"}), 99);
+        assert_eq!(ev["self_id"], 99);
+        assert_eq!(ev["post_type"], "message");
     }
 }

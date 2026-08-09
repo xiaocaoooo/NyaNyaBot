@@ -92,8 +92,8 @@ impl Dispatcher {
                 if !match_event(&l.event, &event_key, &event_key_full) {
                     continue;
                 }
-                // Only inject content for message-like events (Go behavior)
-                let payload = if post_type == "message" || post_type == "message_sent" {
+                // Only inject content for message events (Go: postType == "message")
+                let payload = if post_type == "message" {
                     event_raw.clone()
                 } else {
                     raw.clone()
