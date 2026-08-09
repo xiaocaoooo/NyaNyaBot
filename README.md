@@ -113,18 +113,17 @@ pnpm install
 pnpm build          # writes webui/out
 ```
 
-At compile time, `crates/nyanyabot/build.rs` embeds `webui/out` into `generated/frontend` (gitignored). If `webui/out` is missing, it embeds `frontend-placeholder` so tests still compile. Production builds should run `pnpm build` or `cargo xtask frontend` first; Docker copies `webui/out` for the same path.
+At compile time, `crates/nyanyabot/build.rs` embeds `webui/out` into `generated/frontend` (gitignored). If `webui/out` is missing, it embeds `frontend-placeholder` so tests still compile. Local production builds should run `pnpm build` or `cargo xtask frontend` first. The Docker image builds WebUI inside the Dockerfile and feeds `webui/out` to the same path.
 
 ## Docker
 
-Build **from the monorepo parent** (needs `nyanyabot-proto` + `NyaNyaBot`):
+Build **from the monorepo parent** (needs `nyanyabot-proto` + `NyaNyaBot`, BuildKit on). WebUI is built inside the image (needs network for npm + Google Fonts):
 
 ```bash
-# optional but recommended: prebuild frontend export
-cd NyaNyaBot/webui && pnpm build && cd ../..
-
 docker build -f NyaNyaBot/Dockerfile -t nyanyabot .
 ```
+
+See [DOCKER.md](./DOCKER.md) for cache mounts / `cargo-chef` notes.
 
 Or:
 

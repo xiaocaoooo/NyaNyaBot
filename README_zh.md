@@ -113,18 +113,17 @@ pnpm install
 pnpm build          # 生成 webui/out
 ```
 
-编译时由 `crates/nyanyabot/build.rs` 将 `webui/out` 同步到 gitignore 的 `generated/frontend` 并 `rust-embed`。若缺少 `webui/out`，则嵌入 `frontend-placeholder` 以便测试编译。生产请先 `pnpm build` 或 `cargo xtask frontend`；Docker 同样把 `webui/out` 提供给 build.rs。
+编译时由 `crates/nyanyabot/build.rs` 将 `webui/out` 同步到 gitignore 的 `generated/frontend` 并 `rust-embed`。若缺少 `webui/out`，则嵌入 `frontend-placeholder` 以便测试编译。本地生产构建请先 `pnpm build` 或 `cargo xtask frontend`。Docker 镜像会在 Dockerfile 内构建 WebUI，再把 `webui/out` 交给同一路径。
 
 ## Docker
 
-**从 monorepo 父目录**构建（需要同时有 `nyanyabot-proto` 与 `NyaNyaBot`）：
+**从 monorepo 父目录**构建（需要同时有 `nyanyabot-proto` 与 `NyaNyaBot`，并开启 BuildKit）。WebUI 在镜像内构建（需要能访问 npm 与 Google Fonts）：
 
 ```bash
-# 建议先构建前端静态导出
-cd NyaNyaBot/webui && pnpm build && cd ../..
-
 docker build -f NyaNyaBot/Dockerfile -t nyanyabot .
 ```
+
+缓存分层与 `cargo-chef` 说明见 [DOCKER.md](./DOCKER.md)。
 
 或：
 
