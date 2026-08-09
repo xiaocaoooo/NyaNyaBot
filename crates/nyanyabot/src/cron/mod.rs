@@ -153,10 +153,15 @@ impl Scheduler {
                 info!(plugin_id = %plugin_id, cron_id = %listener_id, "cron fired");
                 let _ = host.ensure_awake(&plugin_id).await;
                 let event = json!({"post_type":"cron","cron_id": listener_id});
-                if let Err(err) = plugin.handle(&listener_id, event, None, &trace_id).await {
-                    warn!(plugin_id = %plugin_id, error = %err, "cron handle failed");
-                }
-                host.end_trace(&trace_id);
+                let handle_res = plugin.handle(&listener_id, event, None, &trace_id).await;
+                let (ok, err_msg) = match &handle_res {
+                    Ok(_) => (true, String::new()),
+                    Err(err) => {
+                        warn!(plugin_id = %plugin_id, error = %err, "cron handle failed");
+                        (false, err.to_string())
+                    }
+                };
+                host.end_trace(&trace_id, ok, err_msg);
             }
         });
         self.tasks.write().insert(key, CronTask { handle });

@@ -188,31 +188,28 @@ impl PluginHost {
         );
     }
 
-    pub fn end_trace(&self, trace_id: &str) {
+    pub fn end_trace(&self, trace_id: &str, success: bool, error_message: impl Into<String>) {
+        let error_message = error_message.into();
         if let Some(record) = self.traces.write().unwrap().remove(trace_id)
             && let Some(rec) = self.trigger_recorder.read().unwrap().clone()
         {
             let duration_ms = (chrono::Utc::now() - record.start).num_milliseconds();
-            let data = record.data.clone();
-            let self_id = data.get("self_id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let user_id = data.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let group_id = data.get("group_id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let success = data
-                .get("success")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            let error = data
-                .get("error")
-                .and_then(|v| v.as_str())
-                .or_else(|| data.get("error_message").and_then(|v| v.as_str()))
-                .unwrap_or("")
-                .to_string();
-            let message_id = data.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let message_seq = data
-                .get("message_seq")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let mut data = record.data.clone();
+            if let Some(obj) = data.as_object_mut() {
+                obj.insert("success".into(), serde_json::Value::Bool(success));
+                if !error_message.is_empty() {
+                    obj.insert(
+                        "error_message".into(),
+                        serde_json::Value::String(error_message.clone()),
+                    );
+                }
+            }
+            let self_id = json_i64(&data, "self_id");
+            let user_id = json_i64(&data, "user_id");
+            let group_id = json_i64(&data, "group_id");
+            let error = error_message;
+            // Prefer explicit message_id; fall back to seq/message_seq (Go parseIntOrZero(real_seq)).
+            let (message_id, message_seq) = resolve_message_fields(&data);
             let triggered_at = record.start;
             tokio::spawn(async move {
                 rec.record_async(crate::triggerlog::TriggerRecord {
@@ -228,7 +225,7 @@ impl PluginHost {
                     success,
                     error_message: error,
                     duration_ms,
-                    trigger_data: record.data,
+                    trigger_data: data,
                     triggered_at,
                 })
                 .await;
@@ -1088,6 +1085,56 @@ fn resolve_dependency_order(
     (order, rejected)
 }
 
+fn json_i64(data: &serde_json::Value, key: &str) -> i64 {
+    data.get(key).map(value_as_i64).unwrap_or(0)
+}
+
+fn json_stringish(data: &serde_json::Value, key: &str) -> Option<String> {
+    let v = data.get(key)?;
+    if let Some(s) = v.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(n) = v.as_i64() {
+        return Some(n.to_string());
+    }
+    if let Some(n) = v.as_u64() {
+        return Some(n.to_string());
+    }
+    if let Some(n) = v.as_f64() {
+        return Some((n as i64).to_string());
+    }
+    None
+}
+
+fn value_as_i64(v: &serde_json::Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_u64().map(|n| n as i64))
+        .or_else(|| v.as_f64().map(|n| n as i64))
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        .unwrap_or(0)
+}
+
+/// Resolve message_id / message_seq from begin_trace payload (Go plugin_trigger_logs parity).
+fn resolve_message_fields(data: &serde_json::Value) -> (i64, String) {
+    let message_id = {
+        let direct = json_i64(data, "message_id");
+        if direct != 0 {
+            direct
+        } else {
+            let from_seq = json_i64(data, "seq");
+            if from_seq != 0 {
+                from_seq
+            } else {
+                json_i64(data, "message_seq")
+            }
+        }
+    };
+    let message_seq = json_stringish(data, "message_seq")
+        .or_else(|| json_stringish(data, "seq"))
+        .unwrap_or_default();
+    (message_id, message_seq)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1100,6 +1147,34 @@ mod tests {
             instance_ids_for("external.echo", &cfg),
             vec!["external.echo".to_string()]
         );
+    }
+
+    #[test]
+    fn resolve_message_fields_prefers_explicit_keys() {
+        let data = serde_json::json!({
+            "message_id": 7,
+            "message_seq": "42",
+            "seq": 99
+        });
+        let (id, seq) = resolve_message_fields(&data);
+        assert_eq!(id, 7);
+        assert_eq!(seq, "42");
+    }
+
+    #[test]
+    fn resolve_message_fields_falls_back_to_numeric_seq() {
+        let data = serde_json::json!({"seq": 1001});
+        let (id, seq) = resolve_message_fields(&data);
+        assert_eq!(id, 1001);
+        assert_eq!(seq, "1001");
+    }
+
+    #[test]
+    fn resolve_message_fields_string_seq() {
+        let data = serde_json::json!({"message_seq": "55"});
+        let (id, seq) = resolve_message_fields(&data);
+        assert_eq!(id, 55);
+        assert_eq!(seq, "55");
     }
 
     #[test]

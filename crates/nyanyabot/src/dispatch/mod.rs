@@ -99,6 +99,8 @@ impl Dispatcher {
                     raw.clone()
                 };
                 let trace_id = self.host.generate_trace_id();
+                let real_seq = get_real_seq_string(&raw);
+                let message_id = parse_i64_loose(&real_seq);
                 self.host.begin_trace(
                     &trace_id,
                     pid,
@@ -110,16 +112,24 @@ impl Dispatcher {
                         "user_id": user_id,
                         "group_id": group_id,
                         "self_id": get_i64(&raw, "self_id"),
+                        "message_id": message_id,
+                        "message_seq": real_seq,
+                        "raw_message": get_string(&raw, "raw_message"),
                     }),
                 );
                 info!(plugin_id = %pid, event_id = %l.id, event_type = %event_key, "event dispatched");
                 if let Err(err) = self.host.ensure_awake(pid).await {
                     warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
                 }
-                if let Err(err) = plugin.handle(&l.id, payload, None, &trace_id).await {
-                    warn!(plugin_id = %pid, error = %err, "event handle failed");
-                }
-                self.host.end_trace(&trace_id);
+                let handle_res = plugin.handle(&l.id, payload, None, &trace_id).await;
+                let (ok, err_msg) = match &handle_res {
+                    Ok(_) => (true, String::new()),
+                    Err(err) => {
+                        warn!(plugin_id = %pid, error = %err, "event handle failed");
+                        (false, err.to_string())
+                    }
+                };
+                self.host.end_trace(&trace_id, ok, err_msg);
             }
         }
 
@@ -211,31 +221,42 @@ impl Dispatcher {
                 }
                 let match_data = CommandMatch { full, groups };
                 let trace_id = self.host.generate_trace_id();
+                let real_seq = get_real_seq_string(&raw);
+                let message_id = parse_i64_loose(&real_seq);
                 self.host.begin_trace(
                     &trace_id,
                     pid,
                     &l.id,
-                    "message",
+                    "command",
                     json!({
                         "group_id": group_id,
                         "user_id": user_id,
                         "self_id": get_i64(&raw, "self_id"),
                         "raw_message": raw_message,
-                        "seq": message_seq,
+                        "seq": real_seq,
+                        "message_id": message_id,
+                        "message_seq": real_seq,
                         "content": content,
+                        "pattern": &l.pattern,
+                        "match_full": match_data.full.clone(),
+                        "match_groups": match_data.groups.clone(),
                     }),
                 );
                 info!(plugin_id = %pid, command_id = %l.id, "command matched");
                 if let Err(err) = self.host.ensure_awake(pid).await {
                     warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
                 }
-                if let Err(err) = plugin
+                let handle_res = plugin
                     .handle(&l.id, command_raw.clone(), Some(match_data), &trace_id)
-                    .await
-                {
-                    warn!(plugin_id = %pid, error = %err, "command handle failed");
-                }
-                self.host.end_trace(&trace_id);
+                    .await;
+                let (ok, err_msg) = match &handle_res {
+                    Ok(_) => (true, String::new()),
+                    Err(err) => {
+                        warn!(plugin_id = %pid, error = %err, "command handle failed");
+                        (false, err.to_string())
+                    }
+                };
+                self.host.end_trace(&trace_id, ok, err_msg);
             }
         }
     }
@@ -249,14 +270,36 @@ fn get_string(v: &Value, key: &str) -> String {
 }
 
 fn get_i64(v: &Value, key: &str) -> i64 {
-    v.get(key)
-        .and_then(|x| {
-            x.as_i64()
-                .or_else(|| x.as_u64().map(|n| n as i64))
-                .or_else(|| x.as_f64().map(|n| n as i64))
-                .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
-        })
+    v.get(key).map(value_as_i64).unwrap_or(0)
+}
+
+fn value_as_i64(x: &Value) -> i64 {
+    x.as_i64()
+        .or_else(|| x.as_u64().map(|n| n as i64))
+        .or_else(|| x.as_f64().map(|n| n as i64))
+        .or_else(|| x.as_str().map(parse_i64_loose))
         .unwrap_or(0)
+}
+
+fn parse_i64_loose(s: &str) -> i64 {
+    s.trim().parse().unwrap_or(0)
+}
+
+/// Prefer string form of real_seq (Go getString); numbers stringify.
+fn get_real_seq_string(v: &Value) -> String {
+    match v.get("real_seq") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(other) => {
+            let n = value_as_i64(other);
+            if n == 0 && !other.is_number() {
+                String::new()
+            } else {
+                n.to_string()
+            }
+        }
+        None => String::new(),
+    }
 }
 
 /// Align with Go deriveContent: use `message` only (string or text segments).
@@ -288,6 +331,10 @@ fn inject_content_field(raw: &Value, content: &str) -> Value {
 }
 
 /// Strip message prefix. Returns None if pattern invalid or does not match (Go skip behavior).
+/// Align with Go stripMessagePrefix:
+/// - match must start at index 0
+/// - prefer non-empty named `content` group
+/// - otherwise return remainder after full match
 fn strip_message_prefix(input: &str, pattern: &str) -> Option<String> {
     let pattern = pattern.trim();
     if pattern.is_empty() {
@@ -295,17 +342,19 @@ fn strip_message_prefix(input: &str, pattern: &str) -> Option<String> {
     }
     let re = Regex::new(pattern).ok()?;
     let caps = re.captures(input)?;
+    let full = caps.get(0)?;
+    // Go: loc[0] != 0 => not matched for prefix purposes
+    if full.start() != 0 {
+        return None;
+    }
     if let Some(c) = caps.name("content") {
-        return Some(c.as_str().to_string());
+        let s = c.as_str();
+        if !s.is_empty() {
+            return Some(s.to_string());
+        }
     }
-    if let Some(c) = caps.get(1) {
-        return Some(c.as_str().to_string());
-    }
-    // matched but no capture group: treat full match strip as empty remainder after match
-    if let Some(m) = caps.get(0) {
-        return Some(input[m.end()..].to_string());
-    }
-    None
+    // Remainder after the full match (Go TrimPrefix / msg[loc[1]:]).
+    Some(input[full.end()..].to_string())
 }
 
 fn compute_event_keys(raw: &Value) -> (String, String) {
@@ -375,6 +424,34 @@ mod tests {
             Some("echo hi")
         );
         assert!(strip_message_prefix("echo hi", pat).is_none());
+    }
+
+    #[test]
+    fn prefix_must_start_at_beginning() {
+        // Even without ^, Go requires match at index 0.
+        let pat = r"/(?P<content>.+)$";
+        assert_eq!(
+            strip_message_prefix("/echo hi", pat).as_deref(),
+            Some("echo hi")
+        );
+        assert!(strip_message_prefix("x/echo hi", pat).is_none());
+    }
+
+    #[test]
+    fn prefix_without_content_group_returns_remainder() {
+        let pat = r"^/";
+        assert_eq!(
+            strip_message_prefix("/echo hi", pat).as_deref(),
+            Some("echo hi")
+        );
+    }
+
+    #[test]
+    fn real_seq_string_and_parse() {
+        assert_eq!(get_real_seq_string(&json!({"real_seq": "42"})), "42");
+        assert_eq!(get_real_seq_string(&json!({"real_seq": 99})), "99");
+        assert_eq!(parse_i64_loose("100"), 100);
+        assert_eq!(parse_i64_loose(""), 0);
     }
 
     #[test]
