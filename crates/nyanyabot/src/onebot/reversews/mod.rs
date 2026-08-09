@@ -99,11 +99,12 @@ impl Server {
     }
 
     pub async fn call(&self, action: &str, params: Value) -> Result<ApiResponse> {
-        let bot = *self.default_bot.read();
-        let Some(bot) = bot else {
-            bail!("no onebot connection");
-        };
-        self.call_with_bot(bot, action, params).await
+        let ids = self.get_bot_ids();
+        match ids.as_slice() {
+            [] => bail!("no onebot connection"),
+            [bot] => self.call_with_bot(*bot, action, params).await,
+            _ => bail!("multiple bots connected, use CallWithBot to specify self_id"),
+        }
     }
 
     pub async fn call_with_bot(
@@ -137,11 +138,14 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         info!(%addr, "onebot reverse ws listening");
         let this = self.clone();
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                this.shutdown.notified().await;
-            })
-            .await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            this.shutdown.notified().await;
+        })
+        .await?;
         Ok(())
     }
 
@@ -150,11 +154,16 @@ impl Server {
     }
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, State(server): State<Arc<Server>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(server, socket))
+async fn ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(server): State<Arc<Server>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    let remote = addr.to_string();
+    ws.on_upgrade(move |socket| handle_socket(server, socket, remote))
 }
 
-async fn handle_socket(server: Arc<Server>, socket: WebSocket) {
+async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
@@ -169,7 +178,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket) {
     let session = Arc::new(Session {
         self_id: 0,
         nickname: String::new(),
-        remote: "ws".into(),
+        remote: remote.clone(),
         connected_at: chrono::Utc::now(),
         groups: Vec::new(),
         tx: tx.clone(),
@@ -289,7 +298,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket) {
     let live = Arc::new(Session {
         self_id: user_id,
         nickname: nickname.clone(),
-        remote: "ws".into(),
+        remote,
         connected_at: chrono::Utc::now(),
         groups,
         tx,

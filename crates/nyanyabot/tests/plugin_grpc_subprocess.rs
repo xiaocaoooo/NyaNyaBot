@@ -262,24 +262,42 @@ async fn subprocess_idle_sleep_mark() {
         .await
         .unwrap();
 
+    let pid_before = host.plugin_os_pid("external.echo").await;
+    assert!(
+        pid_before.is_some(),
+        "plugin process should be running after load"
+    );
+
     // force last_used into the past by waiting >1s without touch; watch ticks every 1s
-    // first touch happened at load; wait 2.5s for maybe_sleep
     tokio::time::sleep(Duration::from_millis(2500)).await;
     assert!(
         host.plugin_is_sleeping("external.echo").await,
         "plugin should be marked sleeping after idle timeout"
     );
+    // True sleep stops the OS process.
+    assert!(
+        host.plugin_os_pid("external.echo").await.is_none(),
+        "idle sleep should stop the plugin process"
+    );
 
-    // activity clears sleep via LazyPlugin path (PluginHost::reconfigure bypasses lazy)
-    let (plugin, _) = pm.get("external.echo").await.unwrap();
-    plugin
-        .configure(serde_json::json!({"prefix": "awake: "}))
-        .await
-        .unwrap();
+    // Wake path restarts process and clears sleeping mark.
+    host.ensure_awake("external.echo").await.unwrap();
     assert!(
         !host.plugin_is_sleeping("external.echo").await,
-        "lazy configure should clear sleeping mark"
+        "ensure_awake should clear sleeping mark"
     );
+    let pid_after = host.plugin_os_pid("external.echo").await;
+    assert!(
+        pid_after.is_some(),
+        "plugin process should be running after wake"
+    );
+    assert_ne!(
+        pid_before, pid_after,
+        "wake should start a new process after idle stop"
+    );
+
+    // Live process should accept configure again.
+    host.reconfigure_plugin("external.echo").await.unwrap();
     host.close().await;
 }
 

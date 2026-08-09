@@ -407,11 +407,29 @@ impl AppConfig {
     }
 
     pub fn command_overrides(&self, plugin_id: &str, listener_id: &str) -> Vec<OverrideRule> {
-        self.plugin_controls
-            .get(plugin_id)
-            .and_then(|c| c.command_overrides.get(listener_id))
-            .cloned()
-            .unwrap_or_default()
+        let Some(ctrl) = self.plugin_controls.get(plugin_id) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        if let Some(global) = ctrl.command_overrides.get("global") {
+            out.extend(global.iter().cloned());
+        }
+        if listener_id != "global"
+            && let Some(specific) = ctrl.command_overrides.get(listener_id)
+        {
+            out.extend(specific.iter().cloned());
+        }
+        out
+    }
+
+    pub fn effective_command_prefix(&self, plugin_id: &str) -> String {
+        if let Some(ctrl) = self.plugin_controls.get(plugin_id) {
+            let p = ctrl.command_prefix.trim();
+            if !p.is_empty() {
+                return p.to_string();
+            }
+        }
+        self.message_prefix.clone()
     }
 }
 

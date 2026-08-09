@@ -125,7 +125,14 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     host.load_exec(&echo_bin).await.unwrap();
 
     let onebot = ReverseWsServer::new(store.clone());
-    let dispatcher = Dispatcher::new(pm.clone(), store.clone(), stats.clone(), host.clone(), None);
+    let dispatcher = Dispatcher::new(
+        pm.clone(),
+        store.clone(),
+        stats.clone(),
+        host.clone(),
+        None,
+        Some(onebot.clone()),
+    );
     let disp = dispatcher.clone();
     onebot.set_handler(move |event: Value| {
         disp.dispatch(event);
@@ -137,14 +144,17 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     });
     tokio::time::sleep(Duration::from_millis(150)).await;
 
+    // Commands are group-only (Go parity); prefix default requires leading '/'.
     let event = json!({
         "post_type":"message",
-        "message_type":"private",
+        "message_type":"group",
+        "group_id": 1001,
         "user_id": 7,
         "self_id": 4242,
-        "raw_message": "echo hello-ws",
-        "message": [{"type":"text","data":{"text":"echo hello-ws"}}],
-        "message_id": 99
+        "raw_message": "/echo hello-ws",
+        "message": [{"type":"text","data":{"text":"/echo hello-ws"}}],
+        "message_id": 99,
+        "real_seq": 42
     });
     let client = tokio::spawn(fake_onebot_session(addr, 4242, Some(event)));
 
@@ -162,7 +172,12 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     for _ in 0..80 {
         let calls = recorded.lock().await;
         if calls.iter().any(|(a, p)| {
-            a == "send_private_msg" && p.get("user_id").and_then(|v| v.as_i64()) == Some(7)
+            a == "send_group_msg"
+                && p.get("group_id").and_then(|v| v.as_i64()) == Some(1001)
+                && p.get("message")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.contains("hello-ws"))
+                    .unwrap_or(false)
         }) {
             got = true;
             break;
@@ -172,7 +187,7 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     }
     assert!(
         got,
-        "echo plugin should call send_private_msg after reverse-ws event; got {:?}",
+        "echo plugin should call send_group_msg after reverse-ws group command; got {:?}",
         recorded.lock().await
     );
 

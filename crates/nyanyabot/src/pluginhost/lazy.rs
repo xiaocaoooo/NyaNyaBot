@@ -19,7 +19,6 @@ pub struct LazyPlugin {
     plugin_id: String,
 }
 
-#[allow(dead_code)]
 impl LazyPlugin {
     pub fn new(plugin_id: String, inner: Arc<dyn Plugin>, sleep_timeout_secs: i64) -> Arc<Self> {
         Arc::new(Self {
@@ -50,7 +49,11 @@ impl LazyPlugin {
             let mut sleeping = self.sleeping.lock().expect("lock");
             if !*sleeping {
                 *sleeping = true;
-                info!(plugin_id = %self.plugin_id, idle_secs = idle.as_secs(), "plugin idle sleep marked");
+                info!(
+                    plugin_id = %self.plugin_id,
+                    idle_secs = idle.as_secs(),
+                    "plugin idle sleep marked"
+                );
                 return true;
             }
         }
@@ -69,7 +72,7 @@ impl LazyPlugin {
 #[async_trait]
 impl Plugin for LazyPlugin {
     async fn descriptor(&self) -> Result<Descriptor, StructuredError> {
-        self.touch();
+        // Listing descriptors should not wake a sleeping plugin.
         self.inner.descriptor().await
     }
 
@@ -85,7 +88,7 @@ impl Plugin for LazyPlugin {
         caller_plugin_id: &str,
     ) -> Result<Value, StructuredError> {
         if self.is_sleeping() {
-            warn!(plugin_id = %self.plugin_id, "invoke on sleeping plugin; touching");
+            warn!(plugin_id = %self.plugin_id, "invoke while sleeping; caller should ensure_awake");
         }
         self.touch();
         self.inner.invoke(method, params, caller_plugin_id).await
@@ -98,6 +101,9 @@ impl Plugin for LazyPlugin {
         match_data: Option<CommandMatch>,
         trace_id: &str,
     ) -> Result<(), StructuredError> {
+        if self.is_sleeping() {
+            warn!(plugin_id = %self.plugin_id, "handle while sleeping; caller should ensure_awake");
+        }
         self.touch();
         self.inner
             .handle(listener_id, event_raw, match_data, trace_id)
@@ -105,7 +111,15 @@ impl Plugin for LazyPlugin {
     }
 
     async fn status(&self) -> Result<String, StructuredError> {
-        self.inner.status().await
+        if self.is_sleeping() {
+            return Ok("Sleeping".into());
+        }
+        // Do not touch/wake on status checks.
+        match self.inner.status().await {
+            Ok(s) if s.trim().is_empty() => Ok("Idle".into()),
+            Ok(s) => Ok(s),
+            Err(_) => Ok("Crashed".into()),
+        }
     }
 
     async fn shutdown(&self) -> Result<(), StructuredError> {
@@ -146,7 +160,7 @@ mod tests {
             Ok(())
         }
         async fn status(&self) -> Result<String, StructuredError> {
-            Ok("OK".into())
+            Ok("Running".into())
         }
         async fn shutdown(&self) -> Result<(), StructuredError> {
             Ok(())
@@ -157,10 +171,10 @@ mod tests {
     async fn marks_sleep_after_timeout() {
         let lazy = LazyPlugin::new("dummy".into(), Arc::new(Dummy), 1);
         assert!(!lazy.maybe_sleep());
-        // force last_used into the past
         *lazy.last_used.lock().unwrap() = Instant::now() - Duration::from_secs(5);
         assert!(lazy.maybe_sleep());
         assert!(lazy.is_sleeping());
+        assert_eq!(lazy.status().await.unwrap(), "Sleeping");
         lazy.touch();
         assert!(!lazy.is_sleeping());
     }

@@ -57,10 +57,10 @@ pub struct PluginHost {
     host_state: SharedHostState,
     host_addr: Arc<RwLock<String>>,
     running: Mutex<HashMap<String, RunningPlugin>>,
-    by_path: Mutex<HashMap<PathBuf, String>>,
+    by_path: Mutex<HashMap<PathBuf, Vec<String>>>,
     trigger_recorder: RwLock<Option<Arc<TriggerRecorder>>>,
     traces: RwLock<HashMap<String, TraceRecord>>,
-    restart_tx: mpsc::UnboundedSender<PathBuf>,
+    restart_tx: mpsc::UnboundedSender<(PathBuf, String)>,
     _host_server: Mutex<Option<tokio::task::JoinHandle<()>>>,
     _restart_worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -89,6 +89,7 @@ impl PluginHost {
             tokens: Arc::new(RwLock::new(HashMap::new())),
             call_onebot,
             plugin_sent: Arc::new(RwLock::new(HashMap::new())),
+            ensure_awake: Arc::new(RwLock::new(None)),
         };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -108,7 +109,7 @@ impl PluginHost {
             }
         });
 
-        let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<PathBuf>();
+        let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<(PathBuf, String)>();
         let host = Arc::new(Self {
             pm,
             store,
@@ -125,18 +126,32 @@ impl PluginHost {
         });
         let worker_host = Arc::clone(&host);
         let worker = tokio::spawn(async move {
-            while let Some(exe) = restart_rx.recv().await {
-                // small delay to avoid tight crash loops
+            while let Some((exe, plugin_id)) = restart_rx.recv().await {
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                match worker_host.load_exec(&exe).await {
-                    Ok(()) => info!(path = %exe.display(), "plugin auto-restarted"),
+                match worker_host.restart_plugin_at(&exe, &plugin_id).await {
+                    Ok(()) => {
+                        info!(path = %exe.display(), plugin_id = %plugin_id, "plugin auto-restarted")
+                    }
                     Err(err) => {
-                        error!(path = %exe.display(), error = %err, "plugin auto-restart failed")
+                        error!(path = %exe.display(), plugin_id = %plugin_id, error = %err, "plugin auto-restart failed")
                     }
                 }
             }
         });
         *host._restart_worker.lock().await = Some(worker);
+
+        // Allow HostService CallDependency to wake idle-stopped plugins.
+        let wake_host = Arc::clone(&host);
+        *host.host_state.ensure_awake.write().unwrap() =
+            Some(Arc::new(move |plugin_id: String| {
+                let h = Arc::clone(&wake_host);
+                Box::pin(async move {
+                    h.ensure_awake(&plugin_id)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                })
+            }));
+
         Ok(host)
     }
 
@@ -229,12 +244,89 @@ impl PluginHost {
         }
         let mut paths = list_plugin_executables(dir)?;
         paths.sort();
+        let cfg = self.store.get();
+        let existing: std::collections::HashSet<String> =
+            self.pm.plugin_ids().await.into_iter().collect();
+
+        let mut started: HashMap<String, RunningPlugin> = HashMap::new();
         let mut errors = Vec::new();
+
         for path in paths {
-            if let Err(err) = self.load_exec(&path).await {
-                errors.push(format!("{}: {err}", path.display()));
+            // Probe base plugin_id from descriptor.
+            let probe = match self.start_plugin_process(&path, "").await {
+                Ok(p) => p,
+                Err(err) => {
+                    errors.push(format!("{}: {err}", path.display()));
+                    continue;
+                }
+            };
+            let base_id = probe.descriptor.plugin_id.clone();
+            // Drop probe process; instances start fresh with correct env/id.
+            let _ = self.discard_unregistered(probe).await;
+
+            let instance_ids = instance_ids_for(&base_id, &cfg);
+            for inst in instance_ids {
+                if existing.contains(&inst) || started.contains_key(&inst) {
+                    errors.push(format!(
+                        "{}: duplicate plugin_id already loaded: {inst}",
+                        path.display()
+                    ));
+                    continue;
+                }
+                match self.start_plugin_process(&path, &inst).await {
+                    Ok(mut running) => {
+                        // Force instance identity even if binary reports base id.
+                        running.plugin_id = inst.clone();
+                        running.descriptor.plugin_id = inst.clone();
+                        running.lazy = LazyPlugin::new(
+                            inst.clone(),
+                            running.lazy.inner(),
+                            sleep_timeout_for(&cfg, &inst),
+                        );
+                        started.insert(inst, running);
+                    }
+                    Err(err) => errors.push(format!("{} [{inst}]: {err}", path.display())),
+                }
             }
         }
+
+        let descs: HashMap<String, Descriptor> = started
+            .iter()
+            .map(|(id, r)| (id.clone(), r.descriptor.clone()))
+            .collect();
+        let (order, rejected) = resolve_dependency_order(&descs, &existing);
+        for (id, reason) in &rejected {
+            errors.push(format!("plugin {id} rejected: {reason}"));
+            if let Some(r) = started.remove(id) {
+                let _ = self.discard_unregistered(r).await;
+            }
+        }
+
+        let mut loaded = existing;
+        for plugin_id in order {
+            let Some(running) = started.remove(&plugin_id) else {
+                continue;
+            };
+            if !deps_ready(&running.descriptor.dependencies, &loaded) {
+                errors.push(format!(
+                    "plugin {plugin_id} skipped: dependency failed during registration"
+                ));
+                let _ = self.discard_unregistered(running).await;
+                continue;
+            }
+            match self.finish_load(running).await {
+                Ok(()) => {
+                    loaded.insert(plugin_id);
+                }
+                Err(err) => errors.push(format!("plugin {plugin_id}: {err}")),
+            }
+        }
+        // Any leftovers failed ordering
+        for (id, running) in started {
+            errors.push(format!("plugin {id} not registered (ordering)"));
+            let _ = self.discard_unregistered(running).await;
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -244,8 +336,81 @@ impl PluginHost {
 
     pub async fn load_exec(self: &Arc<Self>, exe_path: impl AsRef<Path>) -> Result<()> {
         let exe_path = exe_path.as_ref().to_path_buf();
-        let running = self.start_plugin_process(&exe_path, "").await?;
-        self.finish_load(running).await
+        let cfg = self.store.get();
+        let probe = self.start_plugin_process(&exe_path, "").await?;
+        let base_id = probe.descriptor.plugin_id.clone();
+        let _ = self.discard_unregistered(probe).await;
+        let instances = instance_ids_for(&base_id, &cfg);
+        let mut errors = Vec::new();
+        let existing: std::collections::HashSet<String> =
+            self.pm.plugin_ids().await.into_iter().collect();
+        let mut started = HashMap::new();
+        for inst in instances {
+            if existing.contains(&inst) {
+                errors.push(format!("duplicate plugin_id already loaded: {inst}"));
+                continue;
+            }
+            match self.start_plugin_process(&exe_path, &inst).await {
+                Ok(mut running) => {
+                    running.plugin_id = inst.clone();
+                    running.descriptor.plugin_id = inst.clone();
+                    running.lazy = LazyPlugin::new(
+                        inst.clone(),
+                        running.lazy.inner(),
+                        sleep_timeout_for(&cfg, &inst),
+                    );
+                    started.insert(inst, running);
+                }
+                Err(err) => errors.push(err.to_string()),
+            }
+        }
+        let descs: HashMap<String, Descriptor> = started
+            .iter()
+            .map(|(id, r)| (id.clone(), r.descriptor.clone()))
+            .collect();
+        let (order, rejected) = resolve_dependency_order(&descs, &existing);
+        for (id, reason) in rejected {
+            errors.push(format!("plugin {id} rejected: {reason}"));
+            if let Some(r) = started.remove(&id) {
+                let _ = self.discard_unregistered(r).await;
+            }
+        }
+        let mut loaded = existing;
+        for plugin_id in order {
+            let Some(running) = started.remove(&plugin_id) else {
+                continue;
+            };
+            if !deps_ready(&running.descriptor.dependencies, &loaded) {
+                errors.push(format!("plugin {plugin_id} skipped: dependency not ready"));
+                let _ = self.discard_unregistered(running).await;
+                continue;
+            }
+            if let Err(err) = self.finish_load(running).await {
+                errors.push(format!("{plugin_id}: {err}"));
+            } else {
+                loaded.insert(plugin_id);
+            }
+        }
+        for (id, running) in started {
+            errors.push(format!("plugin {id} not registered"));
+            let _ = self.discard_unregistered(running).await;
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!("load_exec errors: {}", errors.join("; "))
+        }
+    }
+
+    async fn discard_unregistered(&self, mut running: RunningPlugin) -> Result<()> {
+        self.host_state.unbind_token(&running.host_token);
+        let _ = running
+            .client
+            .shutdown(Request::new(ShutdownRequest {}))
+            .await;
+        let _ = running.child.kill().await;
+        let _ = running.child.wait().await;
+        Ok(())
     }
 
     async fn finish_load(self: &Arc<Self>, mut running: RunningPlugin) -> Result<()> {
@@ -270,7 +435,9 @@ impl PluginHost {
         self.by_path
             .lock()
             .await
-            .insert(running.exe_path.clone(), plugin_id.clone());
+            .entry(running.exe_path.clone())
+            .or_default()
+            .push(plugin_id.clone());
         self.running.lock().await.insert(plugin_id.clone(), running);
 
         let host = Arc::clone(self);
@@ -286,6 +453,20 @@ impl PluginHost {
             "plugin loaded"
         );
         Ok(())
+    }
+
+    pub async fn restart_plugin_at(self: &Arc<Self>, exe: &Path, plugin_id: &str) -> Result<()> {
+        let _ = self.stop_plugin(plugin_id).await;
+        let mut running = self.start_plugin_process(exe, plugin_id).await?;
+        running.plugin_id = plugin_id.to_string();
+        running.descriptor.plugin_id = plugin_id.to_string();
+        let cfg = self.store.get();
+        running.lazy = LazyPlugin::new(
+            plugin_id.to_string(),
+            running.lazy.inner(),
+            sleep_timeout_for(&cfg, plugin_id),
+        );
+        self.finish_load(running).await
     }
 
     async fn push_config(&self, running: &mut RunningPlugin) -> Result<()> {
@@ -388,6 +569,9 @@ impl PluginHost {
         if descriptor.plugin_id.trim().is_empty() {
             bail!("descriptor plugin_id empty");
         }
+        if !known_plugin_id.is_empty() {
+            descriptor.plugin_id = known_plugin_id.to_string();
+        }
         let plugin_id = descriptor.plugin_id.clone();
 
         // Bind host token to this plugin identity for HostService auth.
@@ -428,6 +612,18 @@ impl PluginHost {
                 }
             };
             if let Some(status) = exited {
+                // If marked sleeping, process exit is expected (idle stop); wait for wake via call path/restart.
+                let sleeping = {
+                    let guard = self.running.lock().await;
+                    guard
+                        .get(&plugin_id)
+                        .map(|p| p.lazy.is_sleeping())
+                        .unwrap_or(false)
+                };
+                if sleeping {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
                 warn!(plugin_id = %plugin_id, %status, "plugin process exited; removing");
                 let exe = {
                     let guard = self.running.lock().await;
@@ -436,14 +632,29 @@ impl PluginHost {
                 self.pm.unregister(&plugin_id).await;
                 if let Some(old) = self.running.lock().await.remove(&plugin_id) {
                     self.host_state.unbind_token(&old.host_token);
+                    if let Some(ids) = self.by_path.lock().await.get_mut(&old.exe_path) {
+                        ids.retain(|id| id != &plugin_id);
+                    }
                 }
                 if let Some(exe) = exe {
-                    let _ = self.restart_tx.send(exe);
+                    let _ = self.restart_tx.send((exe, plugin_id.clone()));
                 }
                 return;
             }
-            if let Some(p) = self.running.lock().await.get(&plugin_id) {
-                let _ = p.lazy.maybe_sleep();
+            let should_sleep = {
+                let guard = self.running.lock().await;
+                guard
+                    .get(&plugin_id)
+                    .map(|p| p.lazy.maybe_sleep())
+                    .unwrap_or(false)
+            };
+            if should_sleep {
+                info!(plugin_id = %plugin_id, "plugin idle: stopping process");
+                if let Some(p) = self.running.lock().await.get_mut(&plugin_id) {
+                    let _ = p.client.shutdown(Request::new(ShutdownRequest {})).await;
+                    let _ = p.child.kill().await;
+                    let _ = p.child.wait().await;
+                }
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -493,9 +704,26 @@ impl PluginHost {
         let Some(exe) = exe else {
             bail!("plugin not running: {plugin_id}");
         };
-        self.stop_plugin(plugin_id).await?;
-        let running = self.start_plugin_process(&exe, plugin_id).await?;
-        self.finish_load(running).await
+        self.restart_plugin_at(&exe, plugin_id).await
+    }
+
+    /// Wake a sleeping plugin process if needed (used before handle/invoke).
+    pub async fn ensure_awake(self: &Arc<Self>, plugin_id: &str) -> Result<()> {
+        let (sleeping, exe, alive) = {
+            let guard = self.running.lock().await;
+            match guard.get(plugin_id) {
+                Some(p) => (
+                    p.lazy.is_sleeping(),
+                    p.exe_path.clone(),
+                    p.child.id().is_some(),
+                ),
+                None => bail!("plugin not running: {plugin_id}"),
+            }
+        };
+        if sleeping || !alive {
+            self.restart_plugin_at(&exe, plugin_id).await?;
+        }
+        Ok(())
     }
 
     pub async fn restart_plugins(self: &Arc<Self>, plugin_ids: Option<Vec<String>>) -> Result<()> {
@@ -511,15 +739,19 @@ impl PluginHost {
         Ok(())
     }
 
-    pub async fn reconfigure_plugin(&self, plugin_id: &str) -> Result<()> {
+    pub async fn reconfigure_plugin(self: &Arc<Self>, plugin_id: &str) -> Result<()> {
+        // Config push needs a live process; wake if idle-stopped.
+        self.ensure_awake(plugin_id).await?;
         let mut guard = self.running.lock().await;
         let Some(running) = guard.get_mut(plugin_id) else {
             bail!("plugin not running: {plugin_id}");
         };
-        self.push_config(running).await
+        self.push_config(running).await?;
+        running.lazy.touch();
+        Ok(())
     }
 
-    pub async fn reconfigure_all(&self) -> Result<()> {
+    pub async fn reconfigure_all(self: &Arc<Self>) -> Result<()> {
         let ids = self.pm.plugin_ids().await;
         for id in ids {
             if let Err(err) = self.reconfigure_plugin(&id).await {
@@ -537,6 +769,9 @@ impl PluginHost {
         self.pm.unregister(plugin_id).await;
         if let Some(mut p) = running.take() {
             self.host_state.unbind_token(&p.host_token);
+            if let Some(ids) = self.by_path.lock().await.get_mut(&p.exe_path) {
+                ids.retain(|id| id != plugin_id);
+            }
             let _ = p.client.shutdown(Request::new(ShutdownRequest {})).await;
             let _ = p.child.kill().await;
             let _ = p.child.wait().await;
@@ -701,8 +936,17 @@ fn list_plugin_executables(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn sleep_timeout_for(cfg: &AppConfig, plugin_id: &str) -> i64 {
+    let enable_sleep = cfg
+        .plugin_controls
+        .get(plugin_id)
+        .and_then(|c| c.enable_sleep)
+        .unwrap_or(true);
+    if !enable_sleep {
+        return 0;
+    }
     if let Some(ctrl) = cfg.plugin_controls.get(plugin_id)
         && let Some(v) = ctrl.sleep_timeout
+        && v > 0
     {
         return v as i64;
     }
@@ -710,5 +954,226 @@ fn sleep_timeout_for(cfg: &AppConfig, plugin_id: &str) -> i64 {
         cfg.global_sleep_timeout as i64
     } else {
         60
+    }
+}
+
+fn instance_ids_for(base_id: &str, cfg: &AppConfig) -> Vec<String> {
+    let prefix = format!("{base_id}@");
+    let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for key in cfg.plugins.keys().chain(cfg.plugin_controls.keys()) {
+        if (key == base_id || key.starts_with(&prefix)) && seen.insert(key.clone()) {
+            ids.push(key.clone());
+        }
+    }
+    if ids.is_empty() {
+        ids.push(base_id.to_string());
+    }
+    ids.sort();
+    ids
+}
+
+fn deps_ready(deps: &[String], loaded: &std::collections::HashSet<String>) -> bool {
+    deps.iter().all(|d| {
+        // Multi-instance deps may be declared as base id; accept any loaded id with base or base@*
+        if loaded.contains(d) {
+            return true;
+        }
+        let prefix = format!("{d}@");
+        loaded.iter().any(|id| id.starts_with(&prefix))
+    })
+}
+
+fn resolve_dependency_order(
+    descs: &HashMap<String, Descriptor>,
+    already_loaded: &std::collections::HashSet<String>,
+) -> (Vec<String>, HashMap<String, String>) {
+    let mut rejected: HashMap<String, String> = HashMap::new();
+    if descs.is_empty() {
+        return (Vec::new(), rejected);
+    }
+
+    // Reject missing deps (allow already loaded or peer batch / multi-instance base).
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (plugin_id, desc) in descs {
+            if rejected.contains_key(plugin_id) {
+                continue;
+            }
+            for dep in &desc.dependencies {
+                if descs.contains_key(dep) {
+                    if rejected.contains_key(dep) {
+                        rejected.insert(
+                            plugin_id.clone(),
+                            format!("dependency {dep} is unavailable"),
+                        );
+                        changed = true;
+                        break;
+                    }
+                    continue;
+                }
+                let prefix = format!("{dep}@");
+                let in_batch = descs.keys().any(|k| k == dep || k.starts_with(&prefix));
+                let loaded = already_loaded.contains(dep)
+                    || already_loaded.iter().any(|k| k.starts_with(&prefix));
+                if !in_batch && !loaded {
+                    rejected.insert(plugin_id.clone(), format!("missing dependency {dep}"));
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    let active: Vec<String> = descs
+        .keys()
+        .filter(|id| !rejected.contains_key(*id))
+        .cloned()
+        .collect();
+    let mut indegree: HashMap<String, i32> = active.iter().map(|id| (id.clone(), 0)).collect();
+    let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+    for id in &active {
+        let desc = &descs[id];
+        for dep in &desc.dependencies {
+            // edge from concrete dep node in active set
+            let providers: Vec<String> = active
+                .iter()
+                .filter(|k| *k == dep || k.starts_with(&format!("{dep}@")))
+                .cloned()
+                .collect();
+            for p in providers {
+                if p == *id {
+                    continue;
+                }
+                edges.entry(p).or_default().push(id.clone());
+                *indegree.entry(id.clone()).or_default() += 1;
+            }
+        }
+    }
+    let mut queue: Vec<String> = indegree
+        .iter()
+        .filter(|(_, d)| **d == 0)
+        .map(|(k, _)| k.clone())
+        .collect();
+    queue.sort();
+    let mut order = Vec::new();
+    while let Some(current) = {
+        if queue.is_empty() {
+            None
+        } else {
+            Some(queue.remove(0))
+        }
+    } {
+        order.push(current.clone());
+        if let Some(nexts) = edges.get(&current).cloned() {
+            for next in nexts {
+                if let Some(d) = indegree.get_mut(&next) {
+                    *d -= 1;
+                    if *d == 0 {
+                        queue.push(next);
+                        queue.sort();
+                    }
+                }
+            }
+        }
+    }
+    if order.len() != active.len() {
+        for id in active {
+            if !order.contains(&id) && !rejected.contains_key(&id) {
+                rejected.insert(id, "dependency cycle".into());
+            }
+        }
+    }
+    (order, rejected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nyanyabot_proto::Descriptor;
+
+    #[test]
+    fn instance_ids_default_base() {
+        let cfg = AppConfig::default();
+        assert_eq!(
+            instance_ids_for("external.echo", &cfg),
+            vec!["external.echo".to_string()]
+        );
+    }
+
+    #[test]
+    fn instance_ids_multi_from_controls() {
+        let mut cfg = AppConfig::default();
+        cfg.plugin_controls.insert(
+            "external.echo@a".into(),
+            crate::config::PluginControl::default(),
+        );
+        cfg.plugins.insert("external.echo".into(), json!({}));
+        cfg.plugins.insert("external.echo@b".into(), json!({"x":1}));
+        let mut ids = instance_ids_for("external.echo", &cfg);
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec![
+                "external.echo".to_string(),
+                "external.echo@a".to_string(),
+                "external.echo@b".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_order_topo() {
+        let mut descs = HashMap::new();
+        descs.insert(
+            "b".into(),
+            Descriptor {
+                plugin_id: "b".into(),
+                dependencies: vec!["a".into()],
+                ..Default::default()
+            },
+        );
+        descs.insert(
+            "a".into(),
+            Descriptor {
+                plugin_id: "a".into(),
+                dependencies: vec![],
+                ..Default::default()
+            },
+        );
+        let (order, rejected) = resolve_dependency_order(&descs, &Default::default());
+        assert!(rejected.is_empty());
+        assert_eq!(order, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn dependency_missing_rejected() {
+        let mut descs = HashMap::new();
+        descs.insert(
+            "x".into(),
+            Descriptor {
+                plugin_id: "x".into(),
+                dependencies: vec!["missing".into()],
+                ..Default::default()
+            },
+        );
+        let (order, rejected) = resolve_dependency_order(&descs, &Default::default());
+        assert!(order.is_empty());
+        assert!(rejected.contains_key("x"));
+    }
+
+    #[test]
+    fn sleep_timeout_disabled() {
+        let mut cfg = AppConfig {
+            global_sleep_timeout: 30,
+            ..Default::default()
+        };
+        let ctrl = crate::config::PluginControl {
+            enable_sleep: Some(false),
+            ..Default::default()
+        };
+        cfg.plugin_controls.insert("p".into(), ctrl);
+        assert_eq!(sleep_timeout_for(&cfg, "p"), 0);
     }
 }

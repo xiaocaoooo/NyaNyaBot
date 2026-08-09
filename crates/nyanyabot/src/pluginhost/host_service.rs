@@ -30,6 +30,15 @@ pub type CallOneBotFn = Arc<
         + Sync,
 >;
 
+pub type EnsureAwakeFn = Arc<
+    dyn Fn(
+            String,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 #[derive(Clone)]
 pub struct SharedHostState {
     pub plugin_manager: Arc<Manager>,
@@ -37,6 +46,7 @@ pub struct SharedHostState {
     pub tokens: Arc<RwLock<HashMap<String, String>>>, // token -> plugin_id
     pub call_onebot: CallOneBotFn,
     pub plugin_sent: Arc<RwLock<HashMap<String, AtomicI64>>>,
+    pub ensure_awake: Arc<RwLock<Option<EnsureAwakeFn>>>,
 }
 
 impl SharedHostState {
@@ -95,7 +105,7 @@ impl HostService for HostServiceImpl {
         );
         let resp = fut.await.map_err(|e| Status::internal(e.to_string()))?;
         self.state.inc_plugin_sent(&caller);
-        self.state.stats.inc_sent();
+        self.state.stats.inc_sent_by_plugin(&caller);
         let response_json =
             serde_json::to_vec(&resp).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(CallOneBotResponse { response_json }))
@@ -140,8 +150,7 @@ impl HostService for HostServiceImpl {
             }));
         }
 
-        let Some((target, target_desc)) =
-            self.state.plugin_manager.get(&args.target_plugin_id).await
+        let Some((_, target_desc)) = self.state.plugin_manager.get(&args.target_plugin_id).await
         else {
             return Ok(Response::new(CallDependencyResponse {
                 result_json: Vec::new(),
@@ -169,6 +178,36 @@ impl HostService for HostServiceImpl {
         } else {
             serde_json::from_slice(&args.params_json)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?
+        };
+
+        // Wake target if it was idle-stopped (true sleep). Process restart replaces Manager entry.
+        let wake = self.state.ensure_awake.read().unwrap().clone();
+        if let Some(wake) = wake
+            && let Err(err) = wake(args.target_plugin_id.clone()).await
+        {
+            return Ok(Response::new(CallDependencyResponse {
+                result_json: Vec::new(),
+                error: Some(
+                    StructuredError::internal(format!(
+                        "failed to wake dependency {}: {err}",
+                        args.target_plugin_id
+                    ))
+                    .to_pb(),
+                ),
+            }));
+        }
+
+        let Some((target, _)) = self.state.plugin_manager.get(&args.target_plugin_id).await else {
+            return Ok(Response::new(CallDependencyResponse {
+                result_json: Vec::new(),
+                error: Some(
+                    StructuredError::not_found(format!(
+                        "dependency plugin not found after wake: {}",
+                        args.target_plugin_id
+                    ))
+                    .to_pb(),
+                ),
+            }));
         };
 
         match target.invoke(&args.method, params, &caller).await {

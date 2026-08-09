@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use parking_lot::Mutex;
 use serde::Serialize;
 
@@ -10,7 +12,11 @@ use serde::Serialize;
 pub struct Snapshot {
     pub recv_count: i64,
     pub sent_count: i64,
+    pub filtered_self_count: i64,
+    pub filtered_non_group_count: i64,
     pub dedup_count: i64,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub plugin_sent_stats: HashMap<String, i64>,
     pub start_time: DateTime<Utc>,
     pub uptime: String,
 }
@@ -19,8 +25,11 @@ pub struct Snapshot {
 pub struct Stats {
     recv: AtomicI64,
     sent: AtomicI64,
+    filtered_self: AtomicI64,
+    filtered_non_group: AtomicI64,
     dedup: AtomicI64,
-    start: Mutex<Instant>,
+    plugin_sent: DashMap<String, AtomicI64>,
+    start: Mutex<std::time::Instant>,
     start_wall: Mutex<DateTime<Utc>>,
 }
 
@@ -29,8 +38,11 @@ impl Stats {
         Arc::new(Self {
             recv: AtomicI64::new(0),
             sent: AtomicI64::new(0),
+            filtered_self: AtomicI64::new(0),
+            filtered_non_group: AtomicI64::new(0),
             dedup: AtomicI64::new(0),
-            start: Mutex::new(Instant::now()),
+            plugin_sent: DashMap::new(),
+            start: Mutex::new(std::time::Instant::now()),
             start_wall: Mutex::new(Utc::now()),
         })
     }
@@ -43,6 +55,25 @@ impl Stats {
         self.sent.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_sent_by_plugin(&self, plugin_id: &str) {
+        if plugin_id.is_empty() {
+            return;
+        }
+        self.plugin_sent
+            .entry(plugin_id.to_string())
+            .or_insert_with(|| AtomicI64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+        self.inc_sent();
+    }
+
+    pub fn inc_filtered_self(&self) {
+        self.filtered_self.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_filtered_non_group(&self) {
+        self.filtered_non_group.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn inc_dedup(&self) {
         self.dedup.fetch_add(1, Ordering::Relaxed);
     }
@@ -50,10 +81,17 @@ impl Stats {
     pub fn snapshot(&self) -> Snapshot {
         let start = *self.start.lock();
         let elapsed = start.elapsed();
+        let mut plugin_sent_stats = HashMap::new();
+        for entry in self.plugin_sent.iter() {
+            plugin_sent_stats.insert(entry.key().clone(), entry.value().load(Ordering::Relaxed));
+        }
         Snapshot {
             recv_count: self.recv.load(Ordering::Relaxed),
             sent_count: self.sent.load(Ordering::Relaxed),
+            filtered_self_count: self.filtered_self.load(Ordering::Relaxed),
+            filtered_non_group_count: self.filtered_non_group.load(Ordering::Relaxed),
             dedup_count: self.dedup.load(Ordering::Relaxed),
+            plugin_sent_stats,
             start_time: *self.start_wall.lock(),
             uptime: format_uptime(elapsed),
         }
@@ -75,9 +113,4 @@ fn format_uptime(d: Duration) -> String {
     } else {
         format!("{secs}s")
     }
-}
-
-#[allow(dead_code)]
-fn system_time_now() -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(Utc::now().timestamp() as u64)
 }

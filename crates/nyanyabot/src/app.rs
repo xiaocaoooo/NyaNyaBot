@@ -78,6 +78,7 @@ impl App {
             stats.clone(),
             host.clone(),
             deduper,
+            Some(onebot.clone()),
         );
 
         let disp = dispatcher.clone();
