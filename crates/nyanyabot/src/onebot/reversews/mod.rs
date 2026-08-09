@@ -6,13 +6,14 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use axum::Router;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -46,7 +47,7 @@ struct Session {
     remote: String,
     connected_at: chrono::DateTime<chrono::Utc>,
     groups: Vec<Group>,
-    tx: mpsc::UnboundedSender<String>,
+    tx: mpsc::UnboundedSender<Message>,
     pending: Mutex<HashMap<String, oneshot::Sender<ApiResponse>>>,
 }
 
@@ -165,11 +166,16 @@ async fn ws_upgrade(
 
 async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let dispatch_events = Arc::new(AtomicBool::new(true));
 
     let write_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if sink.send(Message::Text(msg.into())).await.is_err() {
+            let is_close = matches!(msg, Message::Close(_));
+            if sink.send(msg).await.is_err() {
+                break;
+            }
+            if is_close {
                 break;
             }
         }
@@ -188,6 +194,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     // Bootstrap APIs first via temporary reader task using shared pending map.
     let bootstrap_session = session.clone();
     let server_bg = server.clone();
+    let dispatch_flag = dispatch_events.clone();
     let reader = tokio::spawn(async move {
         let mut identified = 0i64;
         while let Some(Ok(msg)) = stream.next().await {
@@ -226,7 +233,9 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
             } else if let Some(id) = event_self_id(&event) {
                 identified = id;
             }
-            if let Some(handler) = server_bg.handler.read().clone() {
+            if dispatch_flag.load(Ordering::Relaxed)
+                && let Some(handler) = server_bg.handler.read().clone()
+            {
                 handler(event);
             }
         }
@@ -258,11 +267,20 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     let cfg = server.store.get();
     if !cfg.bot_access.allowed(user_id) {
         warn!(self_id = user_id, "bot rejected by access control");
+        // Stop dispatching events (Go cancelReadLoop / ignore keeps socket).
+        dispatch_events.store(false, Ordering::Relaxed);
         if cfg.bot_access.reject_behavior == "ignore" {
+            // Keep connection alive without registering the bot.
             let _ = reader.await;
             write_task.abort();
             return;
         }
+        let _ = tx.send(Message::Close(Some(CloseFrame {
+            code: 1008, // policy violation
+            reason: "bot access denied".into(),
+        })));
+        // Allow write task to flush close frame.
+        tokio::time::sleep(Duration::from_millis(50)).await;
         write_task.abort();
         reader.abort();
         return;
@@ -328,7 +346,7 @@ async fn call_raw(session: &Session, action: &str, params: Value) -> Result<ApiR
     };
     session
         .tx
-        .send(serde_json::to_string(&req)?)
+        .send(Message::Text(serde_json::to_string(&req)?.into()))
         .map_err(|_| anyhow!("ws send failed"))?;
     match tokio::time::timeout(Duration::from_secs(30), rx).await {
         Ok(Ok(resp)) => Ok(resp),
