@@ -1,10 +1,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use nyanyabot_proto::{Descriptor, ensure_descriptor_arrays};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -131,10 +131,10 @@ pub async fn build_plugin_state(
         command_overrides = control.command_overrides.clone();
         env_map = control.env.clone();
         enable_sleep = control.enable_sleep.unwrap_or(true);
-        if let Some(st) = control.sleep_timeout {
-            if st > 0 {
-                sleep_timeout = st;
-            }
+        if let Some(st) = control.sleep_timeout
+            && st > 0
+        {
+            sleep_timeout = st;
         }
     }
 
@@ -239,7 +239,10 @@ fn validate_env_map(env: Option<&HashMap<String, String>>) -> Result<(), String>
     Ok(())
 }
 
-fn apply_plugin_switch_patch(mut control: PluginControl, patch: PluginSwitchPatch) -> PluginControl {
+fn apply_plugin_switch_patch(
+    mut control: PluginControl,
+    patch: PluginSwitchPatch,
+) -> PluginControl {
     if let Some(enabled) = patch.enabled {
         control.enabled = Some(enabled);
     }
@@ -460,8 +463,15 @@ async fn handle_plugin_switches_put(state: &WebInner, plugin_id: &str, body: Val
     Json(json!({"ok": true, "state": state_view})).into_response()
 }
 
-pub async fn api_plugin_sub(State(state): State<Arc<WebInner>>, Path(rest): Path<String>) -> Response {
-    let parts: Vec<&str> = rest.trim_matches('/').split('/').filter(|p| !p.is_empty()).collect();
+pub async fn api_plugin_sub(
+    State(state): State<Arc<WebInner>>,
+    Path(rest): Path<String>,
+) -> Response {
+    let parts: Vec<&str> = rest
+        .trim_matches('/')
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .collect();
     if parts.is_empty() {
         return (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response();
     }
@@ -499,7 +509,11 @@ pub async fn api_plugin_sub_put(
     Path(rest): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    let parts: Vec<&str> = rest.trim_matches('/').split('/').filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = rest
+        .trim_matches('/')
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .collect();
     if parts.len() < 2 {
         return (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response();
     }
@@ -528,3 +542,69 @@ pub async fn api_plugin_sub_put(
     }
 }
 
+pub async fn api_plugin_sub_post(
+    State(state): State<Arc<WebInner>>,
+    Path(rest): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let parts: Vec<&str> = rest
+        .trim_matches('/')
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response();
+    }
+    let plugin_id = parts[0];
+    match parts[1] {
+        "test-override" => handle_test_override(&state, plugin_id, body).await,
+        _ => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
+    }
+}
+
+async fn handle_test_override(_state: &WebInner, _plugin_id: &str, body: Value) -> Response {
+    #[derive(Deserialize)]
+    struct Req {
+        #[serde(default)]
+        input: String,
+        #[serde(default)]
+        overrides: Vec<crate::util::OverrideRule>,
+        #[serde(default)]
+        commands: Vec<CommandListenerIn>,
+    }
+    #[derive(Deserialize)]
+    struct CommandListenerIn {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        pattern: String,
+    }
+
+    let req: Req = match serde_json::from_value(body) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": err.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    let commands: Vec<crate::util::CommandPattern> = req
+        .commands
+        .into_iter()
+        .map(|c| crate::util::CommandPattern {
+            id: c.id,
+            name: c.name,
+            pattern: c.pattern,
+        })
+        .collect();
+    Json(crate::util::test_override_response(
+        &req.input,
+        &req.overrides,
+        &commands,
+    ))
+    .into_response()
+}

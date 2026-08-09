@@ -8,7 +8,10 @@ fn main() {
     let webui_out = manifest_dir.join("../../webui/out");
     let placeholder = manifest_dir.join("frontend-placeholder");
 
-    println!("cargo:rerun-if-changed={}", webui_out.join("index.html").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        webui_out.join("index.html").display()
+    );
     println!("cargo:rerun-if-changed={}", webui_out.display());
     rerun_if_dir_changed(&placeholder);
 
@@ -40,10 +43,7 @@ fn main() {
         &generated.join("plugins/index.html"),
         &placeholder.join("plugins/index.html"),
     );
-    ensure_file(
-        &generated.join("404.html"),
-        &placeholder.join("404.html"),
-    );
+    ensure_file(&generated.join("404.html"), &placeholder.join("404.html"));
 }
 
 fn rerun_if_dir_changed(dir: &Path) {

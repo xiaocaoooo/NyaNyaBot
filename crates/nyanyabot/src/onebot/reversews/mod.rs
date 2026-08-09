@@ -34,7 +34,9 @@ pub struct Group {
 pub struct BotInfo {
     pub self_id: i64,
     pub nickname: String,
-    pub remote: String,
+    pub remote_addr: String,
+    pub connected_at: chrono::DateTime<chrono::Utc>,
+    pub group_count: usize,
     pub groups: Vec<Group>,
 }
 
@@ -42,6 +44,7 @@ struct Session {
     self_id: i64,
     nickname: String,
     remote: String,
+    connected_at: chrono::DateTime<chrono::Utc>,
     groups: Vec<Group>,
     tx: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<String, oneshot::Sender<ApiResponse>>>,
@@ -87,7 +90,9 @@ impl Server {
             .map(|s| BotInfo {
                 self_id: s.self_id,
                 nickname: s.nickname.clone(),
-                remote: s.remote.clone(),
+                remote_addr: s.remote.clone(),
+                connected_at: s.connected_at,
+                group_count: s.groups.len(),
                 groups: s.groups.clone(),
             })
             .collect()
@@ -165,6 +170,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket) {
         self_id: 0,
         nickname: String::new(),
         remote: "ws".into(),
+        connected_at: chrono::Utc::now(),
         groups: Vec::new(),
         tx: tx.clone(),
         pending: Mutex::new(HashMap::new()),
@@ -284,6 +290,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket) {
         self_id: user_id,
         nickname: nickname.clone(),
         remote: "ws".into(),
+        connected_at: chrono::Utc::now(),
         groups,
         tx,
         pending: Mutex::new(HashMap::new()),

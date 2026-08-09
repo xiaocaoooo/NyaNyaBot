@@ -189,21 +189,32 @@ impl PluginHost {
             let error = data
                 .get("error")
                 .and_then(|v| v.as_str())
+                .or_else(|| data.get("error_message").and_then(|v| v.as_str()))
                 .unwrap_or("")
                 .to_string();
+            let message_id = data.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let message_seq = data
+                .get("message_seq")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let triggered_at = record.start;
             tokio::spawn(async move {
                 rec.record_async(crate::triggerlog::TriggerRecord {
                     trace_id: record.trace_id,
                     plugin_id: record.plugin_id,
                     listener_id: record.listener_id,
-                    trace_type: record.trace_type,
+                    listener_type: record.trace_type,
                     self_id,
                     user_id,
                     group_id,
+                    message_id,
+                    message_seq,
                     success,
-                    error,
+                    error_message: error,
                     duration_ms,
-                    data: record.data,
+                    trigger_data: record.data,
+                    triggered_at,
                 })
                 .await;
             });

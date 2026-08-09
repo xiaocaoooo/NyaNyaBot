@@ -85,6 +85,7 @@ async fn host_rest_and_plugins_smoke() {
         host.clone(),
         onebot,
         trigger,
+        None,
     );
 
     // bind ephemeral by updating config is already 127.0.0.1:0 — serve spawns

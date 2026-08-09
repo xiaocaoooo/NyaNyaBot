@@ -60,7 +60,8 @@ fn raw_http(addr: &str, request: &str) -> HttpResponse {
                             .lines()
                             .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
                         {
-                            if let Ok(n) = cl.split(':').nth(1).unwrap_or("0").trim().parse::<usize>()
+                            if let Ok(n) =
+                                cl.split(':').nth(1).unwrap_or("0").trim().parse::<usize>()
                             {
                                 let body_start = header_end + 4;
                                 if buf.len() >= body_start + n {
@@ -145,7 +146,7 @@ async fn start_web() -> (std::sync::Arc<WebServer>, String, String) {
         .unwrap();
     let onebot = nyanyabot::onebot::reversews::Server::new(store.clone());
     let trigger = nyanyabot::triggerlog::Recorder::new(&store.get().trigger_log);
-    let web = WebServer::new(store, pm, stats, host, onebot, trigger);
+    let web = WebServer::new(store, pm, stats, host, onebot, trigger, None);
 
     let web2 = web.clone();
     tokio::spawn(async move {
@@ -257,12 +258,7 @@ async fn login_logout_flow_sets_and_clears_session() {
         .expect("session cookie")
         .to_string();
     assert!(set_cookie.contains("nyanyabot_session="));
-    let session = set_cookie
-        .split(';')
-        .next()
-        .unwrap()
-        .trim()
-        .to_string();
+    let session = set_cookie.split(';').next().unwrap().trim().to_string();
 
     let authed = raw_http(
         &addr,
@@ -341,7 +337,10 @@ async fn plugins_page_requires_auth_and_serves_html() {
     );
     let login = raw_http(&addr, &login_req);
     assert_eq!(login.status, 200, "body={}", login.body_str());
-    let set_cookie = login.header("set-cookie").expect("session cookie").to_string();
+    let set_cookie = login
+        .header("set-cookie")
+        .expect("session cookie")
+        .to_string();
     let session = set_cookie.split(';').next().unwrap().trim().to_string();
 
     for path in ["/plugins/", "/plugins"] {

@@ -95,6 +95,7 @@ impl App {
             host.clone(),
             onebot.clone(),
             trigger.clone(),
+            Some(chat.clone()),
         );
 
         Ok(Self {

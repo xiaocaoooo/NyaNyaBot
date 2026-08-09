@@ -565,6 +565,111 @@ pub fn merge_process_env(
     out
 }
 
+pub fn normalize_string_map(input: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let mut keys: Vec<_> = input.keys().cloned().collect();
+    keys.sort();
+    for k in keys {
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = input
+            .get(&k)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        out.insert(key.to_string(), value);
+    }
+    out
+}
+
+pub fn string_maps_equal(a: &HashMap<String, String>, b: &HashMap<String, String>) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .all(|(k, v)| b.get(k).map(|x| x == v).unwrap_or(false))
+}
+
+/// Apply a partial WebUI config patch without wiping unspecified fields.
+pub fn apply_config_patch(cfg: &mut AppConfig, patch: &serde_json::Value) -> Result<()> {
+    if !patch.is_object() {
+        bail!("config patch must be a JSON object");
+    }
+    if let Some(addr) = patch
+        .pointer("/onebot/reverse_ws/listen_addr")
+        .and_then(|v| v.as_str())
+    {
+        cfg.onebot.reverse_ws.listen_addr = addr.trim().to_string();
+    }
+    if let Some(webui) = patch.get("webui") {
+        if let Some(addr) = webui.get("listen_addr").and_then(|v| v.as_str()) {
+            cfg.webui.listen_addr = addr.trim().to_string();
+        }
+        if let Some(password) = webui.get("password").and_then(|v| v.as_str()) {
+            cfg.webui.password = password.to_string();
+        }
+        if let Some(auto) = webui.get("auto_refresh").and_then(|v| v.as_bool()) {
+            cfg.webui.auto_refresh = Some(auto);
+        }
+        if let Some(interval) = webui.get("refresh_interval").and_then(|v| v.as_i64()) {
+            cfg.webui.refresh_interval = interval;
+        }
+    }
+    if let Some(chat) = patch.get("chat_log") {
+        if let Some(uri) = chat.get("database_uri").and_then(|v| v.as_str()) {
+            cfg.chat_log.database_uri = uri.trim().to_string();
+        }
+        if let Some(size) = chat.pointer("/queue/size").and_then(|v| v.as_i64()) {
+            cfg.chat_log.queue.size = size;
+        }
+    }
+    if let Some(trigger) = patch.get("trigger_log") {
+        if let Some(enabled) = trigger.get("enabled").and_then(|v| v.as_bool()) {
+            cfg.trigger_log.enabled = enabled;
+        }
+        if let Some(uri) = trigger.get("database_uri").and_then(|v| v.as_str()) {
+            cfg.trigger_log.database_uri = uri.trim().to_string();
+        }
+        if let Some(size) = trigger.get("queue_size").and_then(|v| v.as_i64()) {
+            cfg.trigger_log.queue_size = size;
+        }
+        if let Some(size) = trigger.get("batch_size").and_then(|v| v.as_i64()) {
+            cfg.trigger_log.batch_size = size;
+        }
+        if let Some(interval) = trigger.get("batch_interval").and_then(|v| v.as_str()) {
+            cfg.trigger_log.batch_interval = interval.trim().to_string();
+        }
+    }
+    if let Some(prefix) = patch.get("message_prefix").and_then(|v| v.as_str()) {
+        cfg.message_prefix = prefix.to_string();
+    }
+    if let Some(timeout) = patch.get("global_sleep_timeout").and_then(|v| v.as_i64()) {
+        cfg.global_sleep_timeout = timeout as i32;
+    }
+    if let Some(access) = patch.get("global_access") {
+        cfg.global_access = serde_json::from_value(access.clone())
+            .map_err(|e| anyhow::anyhow!("invalid global_access: {e}"))?;
+    }
+    if let Some(bot_access) = patch.get("bot_access") {
+        if let Some(v) = bot_access.get("whitelist_bots") {
+            cfg.bot_access.whitelist_bots = serde_json::from_value(v.clone())
+                .map_err(|e| anyhow::anyhow!("invalid whitelist_bots: {e}"))?;
+        }
+        if let Some(v) = bot_access.get("blacklist_bots") {
+            cfg.bot_access.blacklist_bots = serde_json::from_value(v.clone())
+                .map_err(|e| anyhow::anyhow!("invalid blacklist_bots: {e}"))?;
+        }
+        if let Some(v) = bot_access.get("default_policy").and_then(|v| v.as_str()) {
+            cfg.bot_access.default_policy = v.trim().to_string();
+        }
+        if let Some(v) = bot_access.get("reject_behavior").and_then(|v| v.as_str()) {
+            cfg.bot_access.reject_behavior = v.trim().to_string();
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_env_key(key: &str) -> Result<()> {
     if key.is_empty() {
         bail!("env key is empty");
@@ -617,5 +722,25 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.get().globals.get("a").unwrap(), "1");
+    }
+
+    #[test]
+    fn config_patch_preserves_unrelated_fields() {
+        let mut cfg = AppConfig::default();
+        cfg.webui.password = "secret".into();
+        cfg.plugins
+            .insert("external.echo".into(), serde_json::json!({"prefix":"x"}));
+        apply_config_patch(
+            &mut cfg,
+            &serde_json::json!({
+                "webui": {"listen_addr": "127.0.0.1:3000", "auto_refresh": false, "refresh_interval": 3},
+                "global_sleep_timeout": 42
+            }),
+        )
+        .unwrap();
+        assert_eq!(cfg.webui.password, "secret");
+        assert_eq!(cfg.webui.refresh_interval, 3);
+        assert_eq!(cfg.global_sleep_timeout, 42);
+        assert!(cfg.plugins.contains_key("external.echo"));
     }
 }
