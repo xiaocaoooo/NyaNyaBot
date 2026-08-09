@@ -259,24 +259,24 @@ fn get_i64(v: &Value, key: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// Align with Go deriveContent: use `message` only (string or text segments).
+/// Do NOT prefer raw_message; MatchRaw commands use raw_message separately.
 fn extract_content(raw: &Value) -> String {
-    if let Some(s) = raw.get("raw_message").and_then(|v| v.as_str())
-        && !s.is_empty()
-    {
-        return s.to_string();
-    }
-    if let Some(arr) = raw.get("message").and_then(|v| v.as_array()) {
-        let mut out = String::new();
-        for seg in arr {
-            if seg.get("type").and_then(|t| t.as_str()) == Some("text")
-                && let Some(t) = seg.pointer("/data/text").and_then(|v| v.as_str())
-            {
-                out.push_str(t);
+    match raw.get("message") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(arr)) => {
+            let mut out = String::new();
+            for seg in arr {
+                if seg.get("type").and_then(|t| t.as_str()) == Some("text")
+                    && let Some(t) = seg.pointer("/data/text").and_then(|v| v.as_str())
+                {
+                    out.push_str(t);
+                }
             }
+            out
         }
-        return out;
+        _ => String::new(),
     }
-    String::new()
 }
 
 fn inject_content_field(raw: &Value, content: &str) -> Value {
@@ -383,5 +383,28 @@ mod tests {
         let out = inject_content_field(&raw, "hello");
         assert_eq!(out["content"], "hello");
         assert_eq!(out["raw_message"], "x");
+    }
+
+    #[test]
+    fn match_event_wildcard_and_prefix() {
+        assert!(match_event("*", "notice", "notice.group_increase"));
+        assert!(match_event("notice*", "notice", "notice.group_increase"));
+        assert!(match_event("message", "message", "message.group.normal"));
+        assert!(!match_event("notice", "message", "message.group.normal"));
+    }
+
+    #[test]
+    fn content_from_message_string_not_raw_message() {
+        // Go deriveContent ignores raw_message; only message field.
+        let c = extract_content(&json!({
+            "raw_message": "[CQ:at,qq=1] raw",
+            "message":[{"type":"text","data":{"text":"from-seg"}}]
+        }));
+        assert_eq!(c, "from-seg");
+        let c2 = extract_content(&json!({
+            "raw_message": "raw-only",
+            "message": "plain-message"
+        }));
+        assert_eq!(c2, "plain-message");
     }
 }
