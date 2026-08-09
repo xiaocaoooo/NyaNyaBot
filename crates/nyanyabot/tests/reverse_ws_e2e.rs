@@ -84,6 +84,7 @@ async fn fake_onebot_session(addr: std::net::SocketAddr, self_id: i64, push_even
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reverse_ws_login_event_dispatch_and_hot_reload() {
+    let configdump_bin = ensure_plugin_bin("nyanyabot-plugin-configdump");
     let echo_bin = ensure_plugin_bin("nyanyabot-plugin-echo");
     let dir = tempdir().unwrap();
     let store = Store::new(dir.path()).unwrap();
@@ -97,6 +98,7 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
             cfg.onebot.reverse_ws.listen_addr = addr.to_string();
             cfg.plugins
                 .insert("external.echo".into(), json!({"prefix": "ws: "}));
+            cfg.plugins.insert("external.configdump".into(), json!({}));
             // Go IsPluginEnabled defaults to disabled unless explicitly enabled.
             cfg.plugin_controls.insert(
                 "external.echo".into(),
@@ -130,9 +132,10 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     let host = PluginHost::new(pm.clone(), store.clone(), stats.clone(), call_onebot)
         .await
         .unwrap();
+    host.load_exec(&configdump_bin).await.unwrap();
     host.load_exec(&echo_bin).await.unwrap();
 
-    let onebot = ReverseWsServer::new(store.clone());
+    let onebot = ReverseWsServer::new(store.clone(), stats.clone());
     let dispatcher = Dispatcher::new(
         pm.clone(),
         store.clone(),
@@ -220,6 +223,7 @@ async fn reverse_ws_call_onebot_after_register() {
     let dir = tempdir().unwrap();
     let store = Store::new(dir.path()).unwrap();
     store.load_or_create_default().unwrap();
+    let stats = Stats::new();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -230,7 +234,7 @@ async fn reverse_ws_call_onebot_after_register() {
         })
         .unwrap();
 
-    let onebot = ReverseWsServer::new(store.clone());
+    let onebot = ReverseWsServer::new(store.clone(), stats.clone());
     let ob = onebot.clone();
     let ob_task = tokio::spawn(async move {
         let _ = ob.start().await;

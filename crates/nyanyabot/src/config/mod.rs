@@ -379,8 +379,9 @@ impl AppConfig {
             .unwrap_or(true)
     }
 
+    /// Align with Go IsMessageDedupEnabled: only `message_dedup`, default true.
     pub fn is_message_dedup_enabled(&self) -> bool {
-        self.message_dedup.unwrap_or(self.dedup.enabled)
+        self.message_dedup.unwrap_or(true)
     }
 
     /// Align with Go IsAllowed: only GlobalAccess is enforced.
@@ -501,7 +502,7 @@ impl Store {
             changed = true;
         }
         if cfg.webui.password.trim().is_empty() {
-            cfg.webui.password = generate_webui_password(16)?;
+            cfg.webui.password = generate_webui_password(24)?;
             changed = true;
         }
         if cfg.webui.refresh_interval <= 0 {
@@ -545,6 +546,23 @@ impl Store {
         }
         if cfg.trigger_log.batch_interval.trim().is_empty() {
             cfg.trigger_log.batch_interval = "5s".into();
+            changed = true;
+        }
+        if cfg.webui.auto_refresh.is_none() {
+            cfg.webui.auto_refresh = Some(true);
+            changed = true;
+        }
+        // Go ensureDefaults: MessageDedup defaults to true when omitted.
+        if cfg.message_dedup.is_none() {
+            cfg.message_dedup = Some(true);
+            changed = true;
+        }
+        let backend = cfg.dedup.backend.trim().to_ascii_lowercase();
+        if backend != "memory" && backend != "redis" {
+            anyhow::bail!("dedup backend must be 'memory' or 'redis'");
+        }
+        if backend != cfg.dedup.backend {
+            cfg.dedup.backend = backend;
             changed = true;
         }
         // Normalize maps to keep stable serialization keys optionally later.

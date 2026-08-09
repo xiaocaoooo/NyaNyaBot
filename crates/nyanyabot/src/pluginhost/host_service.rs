@@ -106,8 +106,12 @@ impl HostService for HostServiceImpl {
             args.trace_id.clone(),
         );
         let resp = fut.await.map_err(|e| Status::internal(e.to_string()))?;
-        self.state.inc_plugin_sent(&caller);
-        self.state.stats.inc_sent_by_plugin(&caller);
+        // Go hostAPI.CallOneBot: only IncPluginSent when traceID is non-empty.
+        // Global sent_count is owned by reversews (IncSent on write / successful send_*).
+        if !args.trace_id.trim().is_empty() {
+            self.state.inc_plugin_sent(&caller);
+            self.state.stats.inc_plugin_sent_only(&caller);
+        }
         let response_json =
             serde_json::to_vec(&resp).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(CallOneBotResponse { response_json }))

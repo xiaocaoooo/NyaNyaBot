@@ -1431,6 +1431,7 @@ dependencies = [
  "async-trait",
  "nyanyabot-proto",
  "parking_lot",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

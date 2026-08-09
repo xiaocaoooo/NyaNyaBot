@@ -227,7 +227,7 @@ async fn start_web_with_demo() -> (Arc<WebServer>, String, String, tempfile::Tem
     let host = PluginHost::new(pm.clone(), store.clone(), stats.clone(), call_onebot)
         .await
         .unwrap();
-    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone());
+    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone(), stats.clone());
     let trigger = nyanyabot::triggerlog::Recorder::new(&store.get().trigger_log);
     let web = WebServer::new(store, pm, stats, host, onebot, trigger, None);
 

@@ -4,22 +4,26 @@
   "version": "0.2.0",
   "author": "nyanyabot",
   "description": "回声测试插件",
-  "dependencies": [],
+  "dependencies": [
+    "external.configdump"
+  ],
   "exports": [],
   "config": {
     "version": "1",
     "description": "Echo plugin config",
     "schema": {
+      "additionalProperties": true,
       "properties": {
         "prefix": {
-          "default": "echo: ",
+          "default": "",
+          "description": "echo 回复前缀",
           "type": "string"
         }
       },
       "type": "object"
     },
     "default": {
-      "prefix": "echo: "
+      "prefix": ""
     }
   },
   "commands": [
@@ -27,9 +31,17 @@
       "name": "echo",
       "id": "cmd.echo",
       "description": "匹配 /echo xxx 并回声",
-      "pattern": "^echo\\s+(.+)$",
+      "pattern": "^/?echo\\s+(.+)$",
       "match_raw": false,
       "handler": "HandleEcho"
+    },
+    {
+      "name": "echo_cfg",
+      "id": "cmd.echo.cfg",
+      "description": "调用 external.configdump 导出函数并回显结果",
+      "pattern": "^/?echo_cfg(?:\\s+(pretty))?$",
+      "match_raw": false,
+      "handler": "HandleEchoCfg"
     }
   ],
   "events": [],

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::config::Store;
 use crate::onebot::ob11::{ApiRequest, ApiResponse};
+use crate::stats::Stats;
 
 pub type EventHandler = Arc<dyn Fn(Value) + Send + Sync>;
 
@@ -87,6 +88,7 @@ impl Session {
 #[derive(Clone)]
 pub struct Server {
     store: Arc<Store>,
+    stats: Arc<Stats>,
     handler: Arc<RwLock<Option<EventHandler>>>,
     sessions: Arc<RwLock<HashMap<i64, Arc<Session>>>>,
     default_bot: Arc<RwLock<Option<i64>>>,
@@ -94,9 +96,10 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(store: Arc<Store>) -> Arc<Self> {
+    pub fn new(store: Arc<Store>, stats: Arc<Stats>) -> Arc<Self> {
         Arc::new(Self {
             store,
+            stats,
             handler: Arc::new(RwLock::new(None)),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             default_bot: Arc::new(RwLock::new(None)),
@@ -142,7 +145,7 @@ impl Server {
             .get(&self_id)
             .cloned()
             .ok_or_else(|| anyhow!("bot not connected: {self_id}"))?;
-        call_raw(&session, action, params).await
+        call_raw(&session, action, params, Some(self.stats.clone())).await
     }
 
     pub async fn start(self: Arc<Self>) -> Result<()> {
@@ -259,7 +262,14 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
         }
     });
 
-    let login = match call_raw(&session, "get_login_info", Value::Null).await {
+    let login = match call_raw(
+        &session,
+        "get_login_info",
+        Value::Null,
+        Some(server.stats.clone()),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(err) => {
             warn!(error = %err, "get_login_info failed");
@@ -313,7 +323,13 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     }
 
     let mut groups = Vec::new();
-    if let Ok(resp) = call_raw(&session, "get_group_list", Value::Null).await
+    if let Ok(resp) = call_raw(
+        &session,
+        "get_group_list",
+        Value::Null,
+        Some(server.stats.clone()),
+    )
+    .await
         && let Some(arr) = resp.data.as_array()
     {
         for g in arr {
@@ -376,7 +392,12 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
     info!(self_id = user_id, "bot disconnected");
 }
 
-async fn call_raw(session: &Session, action: &str, params: Value) -> Result<ApiResponse> {
+async fn call_raw(
+    session: &Session,
+    action: &str,
+    params: Value,
+    stats: Option<Arc<Stats>>,
+) -> Result<ApiResponse> {
     if session.is_closed() {
         bail!("session closed");
     }
@@ -396,8 +417,21 @@ async fn call_raw(session: &Session, action: &str, params: Value) -> Result<ApiR
         session.pending.lock().remove(&echo);
         bail!("ws send failed");
     }
+    // Go callWithSession: IncSent on every successful write.
+    if let Some(stats) = &stats {
+        stats.inc_sent();
+    }
     match tokio::time::timeout(Duration::from_secs(30), rx).await {
-        Ok(Ok(resp)) => Ok(resp),
+        Ok(Ok(resp)) => {
+            // Go: successful send_* counts again.
+            if let Some(stats) = &stats
+                && resp.status == "ok"
+                && matches!(action, "send_group_msg" | "send_private_msg" | "send_msg")
+            {
+                stats.inc_sent();
+            }
+            Ok(resp)
+        }
         Ok(Err(_)) => bail!("canceled"),
         Err(_) => {
             session.pending.lock().remove(&echo);

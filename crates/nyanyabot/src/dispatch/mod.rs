@@ -262,11 +262,15 @@ impl Dispatcher {
     }
 }
 
+/// Align with Go getString: stringify numbers and other JSON values.
 fn get_string(v: &Value, key: &str) -> String {
-    v.get(key)
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string()
+    match v.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
 }
 
 fn get_i64(v: &Value, key: &str) -> i64 {
@@ -357,38 +361,40 @@ fn strip_message_prefix(input: &str, pattern: &str) -> Option<String> {
     Some(input[full.end()..].to_string())
 }
 
+/// Align with Go computeEventKeys / designs §5:
+/// - key = post_type
+/// - full = post_type + detail type only (no sub_type)
+/// - message_sent is not given a message_type suffix in Go
 fn compute_event_keys(raw: &Value) -> (String, String) {
     let post = get_string(raw, "post_type");
-    let mut full = post.clone();
     let detail = match post.as_str() {
-        "message" | "message_sent" => get_string(raw, "message_type"),
+        "message" => get_string(raw, "message_type"),
         "notice" => get_string(raw, "notice_type"),
         "request" => get_string(raw, "request_type"),
         "meta_event" => get_string(raw, "meta_event_type"),
         _ => String::new(),
     };
-    if !detail.is_empty() {
-        full = format!("{post}.{detail}");
-    }
-    let sub = get_string(raw, "sub_type");
-    if !sub.is_empty() {
-        full = format!("{full}.{sub}");
-    }
+    let full = if detail.is_empty() {
+        String::new()
+    } else {
+        format!("{post}.{detail}")
+    };
     (post, full)
 }
 
+/// Align with Go matchEvent / designs §5:
+/// - empty selector never matches
+/// - selector with '.' must equal full key exactly
+/// - selector without '.' must equal post_type key exactly
 fn match_event(pattern: &str, key: &str, full: &str) -> bool {
     let pattern = pattern.trim();
-    if pattern.is_empty() || pattern == "*" {
-        return true;
+    if pattern.is_empty() {
+        return false;
     }
-    if pattern == key || pattern == full {
-        return true;
+    if pattern.contains('.') {
+        return pattern == full;
     }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return full.starts_with(prefix) || key.starts_with(prefix);
-    }
-    false
+    pattern == key
 }
 
 #[cfg(test)]
@@ -397,11 +403,18 @@ mod tests {
 
     #[test]
     fn event_keys() {
+        // Go ignores sub_type when building full key.
         let (k, f) = compute_event_keys(&json!({
             "post_type":"message","message_type":"group","sub_type":"normal"
         }));
         assert_eq!(k, "message");
-        assert_eq!(f, "message.group.normal");
+        assert_eq!(f, "message.group");
+
+        let (k2, f2) = compute_event_keys(&json!({
+            "post_type":"message_sent","message_type":"group"
+        }));
+        assert_eq!(k2, "message_sent");
+        assert_eq!(f2, "");
     }
 
     #[test]
@@ -463,11 +476,33 @@ mod tests {
     }
 
     #[test]
-    fn match_event_wildcard_and_prefix() {
-        assert!(match_event("*", "notice", "notice.group_increase"));
-        assert!(match_event("notice*", "notice", "notice.group_increase"));
-        assert!(match_event("message", "message", "message.group.normal"));
-        assert!(!match_event("notice", "message", "message.group.normal"));
+    fn match_event_go_parity() {
+        // Empty never matches.
+        assert!(!match_event("", "message", "message.group"));
+        // No dot: post_type only.
+        assert!(match_event("message", "message", "message.group"));
+        assert!(match_event("notice", "notice", "notice.group_increase"));
+        assert!(!match_event("notice", "message", "message.group"));
+        // With dot: exact full key (no sub_type in full).
+        assert!(match_event("message.group", "message", "message.group"));
+        assert!(!match_event(
+            "message.group.normal",
+            "message",
+            "message.group"
+        ));
+        // No wildcards in Go.
+        assert!(!match_event("*", "notice", "notice.group_increase"));
+        assert!(!match_event("notice*", "notice", "notice.group_increase"));
+    }
+
+    #[test]
+    fn get_string_stringifies_numbers() {
+        assert_eq!(get_string(&json!({"group_id": 12345}), "group_id"), "12345");
+        assert_eq!(
+            get_string(&json!({"raw_message": "hi"}), "raw_message"),
+            "hi"
+        );
+        assert_eq!(get_string(&json!({}), "missing"), "");
     }
 
     #[test]

@@ -33,6 +33,7 @@ fn ensure_plugin_bin(name: &str) -> PathBuf {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fake_onebot_and_plugin_event_path() {
+    let configdump_bin = ensure_plugin_bin("nyanyabot-plugin-configdump");
     let echo_bin = ensure_plugin_bin("nyanyabot-plugin-echo");
     let dir = tempdir().unwrap();
     let store = Store::new(dir.path()).unwrap();
@@ -41,6 +42,7 @@ async fn fake_onebot_and_plugin_event_path() {
         .update(|cfg| {
             cfg.plugins
                 .insert("external.echo".into(), json!({"prefix": "e2e: "}));
+            cfg.plugins.insert("external.configdump".into(), json!({}));
         })
         .unwrap();
 
@@ -66,6 +68,10 @@ async fn fake_onebot_and_plugin_event_path() {
     let host = PluginHost::new(pm.clone(), store, stats, call_onebot)
         .await
         .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), host.load_exec(&configdump_bin))
+        .await
+        .expect("configdump load timeout")
+        .expect("load configdump");
     tokio::time::timeout(Duration::from_secs(15), host.load_exec(&echo_bin))
         .await
         .expect("load timeout")

@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nyanyabot::config::Store;
+use nyanyabot::config::{PluginControl, Store};
 use nyanyabot::onebot::ob11::ApiResponse;
 use nyanyabot::pluginhost::PluginHost;
 use nyanyabot::stats::Stats;
@@ -62,6 +62,14 @@ async fn subprocess_echo_handshake_describe_configure_handle() {
         .update(|cfg| {
             cfg.plugins
                 .insert("external.echo".into(), json!({"prefix": "test: "}));
+            cfg.plugins.insert("external.configdump".into(), json!({}));
+            cfg.plugin_controls.insert(
+                "external.configdump".into(),
+                PluginControl {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            );
         })
         .unwrap();
 
@@ -71,12 +79,25 @@ async fn subprocess_echo_handshake_describe_configure_handle() {
         .await
         .expect("host");
 
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
+        .await
+        .expect("load configdump");
     host.load_exec(&echo_bin).await.expect("load echo");
 
     let list = pm.list().await;
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].plugin_id, "external.echo");
-    assert!(list[0].commands.iter().any(|c| c.id == "cmd.echo"));
+    let ids: Vec<_> = list.iter().map(|d| d.plugin_id.as_str()).collect();
+    assert!(ids.contains(&"external.echo"), "echo loaded: {ids:?}");
+    assert!(
+        ids.contains(&"external.configdump"),
+        "configdump loaded: {ids:?}"
+    );
+    let echo = list
+        .iter()
+        .find(|d| d.plugin_id == "external.echo")
+        .unwrap();
+    assert!(echo.commands.iter().any(|c| c.id == "cmd.echo"));
+    assert!(echo.commands.iter().any(|c| c.id == "cmd.echo.cfg"));
+    assert!(echo.dependencies.iter().any(|d| d == "external.configdump"));
 
     let (plugin, _desc) = pm.get("external.echo").await.expect("get plugin");
     let st = plugin.status().await.expect("status");
@@ -148,6 +169,9 @@ async fn subprocess_wrong_token_rejected_and_graceful_close() {
     let host = PluginHost::new(pm.clone(), store, stats, dummy_call_onebot())
         .await
         .unwrap();
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
+        .await
+        .expect("load configdump");
     host.load_exec(&echo_bin).await.expect("load");
 
     // Discover plugin listen addr by re-spawning is hard; instead verify host close is graceful
@@ -202,6 +226,9 @@ async fn subprocess_invoke_not_found_structured() {
     let host = PluginHost::new(pm.clone(), store, stats, dummy_call_onebot())
         .await
         .unwrap();
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
+        .await
+        .unwrap();
     host.load_exec(&echo_bin).await.unwrap();
     let (plugin, _) = pm.get("external.echo").await.unwrap();
     let err = plugin
@@ -221,6 +248,9 @@ async fn subprocess_crash_auto_restarts() {
     let pm = nyanyabot::plugin::Manager::new();
     let stats = Stats::new();
     let host = PluginHost::new(pm.clone(), store, stats, dummy_call_onebot())
+        .await
+        .unwrap();
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
         .await
         .unwrap();
     host.load_exec(&echo_bin).await.unwrap();
@@ -255,6 +285,9 @@ async fn subprocess_idle_sleep_mark() {
     let pm = nyanyabot::plugin::Manager::new();
     let stats = Stats::new();
     let host = PluginHost::new(pm.clone(), store, stats, dummy_call_onebot())
+        .await
+        .unwrap();
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
         .await
         .unwrap();
     host.load_exec(&echo_bin).await.unwrap();

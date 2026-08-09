@@ -20,7 +20,11 @@ fn workspace_root() -> PathBuf {
 
 fn ensure_bins() {
     let root = workspace_root();
-    for name in ["nyanyabot-plugin-echo", "nyanyabot-plugin-builtin-status"] {
+    for name in [
+        "nyanyabot-plugin-configdump",
+        "nyanyabot-plugin-echo",
+        "nyanyabot-plugin-builtin-status",
+    ] {
         let bin = root.join("target/debug").join(name);
         if !bin.exists() {
             assert!(
@@ -48,6 +52,7 @@ async fn host_rest_and_plugins_smoke() {
             cfg.onebot.reverse_ws.listen_addr = "127.0.0.1:0".into();
             cfg.plugins
                 .insert("external.echo".into(), json!({"prefix": "smoke: "}));
+            cfg.plugins.insert("external.configdump".into(), json!({}));
         })
         .unwrap();
 
@@ -69,6 +74,9 @@ async fn host_rest_and_plugins_smoke() {
         .unwrap();
 
     let root = workspace_root();
+    host.load_exec(&root.join("target/debug/nyanyabot-plugin-configdump"))
+        .await
+        .unwrap();
     host.load_exec(&root.join("target/debug/nyanyabot-plugin-echo"))
         .await
         .unwrap();
@@ -76,7 +84,7 @@ async fn host_rest_and_plugins_smoke() {
         .await
         .unwrap();
 
-    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone());
+    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone(), stats.clone());
     let trigger = nyanyabot::triggerlog::Recorder::new(&store.get().trigger_log);
     let web = WebServer::new(
         store.clone(),
@@ -91,9 +99,10 @@ async fn host_rest_and_plugins_smoke() {
     // bind ephemeral by updating config is already 127.0.0.1:0 — serve spawns
     // Use info endpoint via internal state is hard; instead assert plugin list API shape through manager.
     let plugins = pm.list().await;
-    assert_eq!(plugins.len(), 2);
+    assert_eq!(plugins.len(), 3);
     let ids: Vec<_> = plugins.iter().map(|p| p.plugin_id.as_str()).collect();
     assert!(ids.contains(&"external.echo"));
+    assert!(ids.contains(&"external.configdump"));
     assert!(ids.contains(&"builtin.status"));
 
     // config hot update

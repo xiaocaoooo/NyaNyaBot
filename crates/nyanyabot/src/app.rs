@@ -39,7 +39,7 @@ impl App {
 
         let stats = Stats::new();
         let pm = Manager::new();
-        let onebot = ReverseWsServer::new(store.clone());
+        let onebot = ReverseWsServer::new(store.clone(), stats.clone());
         let trigger = triggerlog::Recorder::new(&cfg.trigger_log);
         if cfg.trigger_log.enabled {
             trigger.start();
@@ -66,8 +66,15 @@ impl App {
             .context("plugin host")?;
         host.set_trigger_recorder(trigger.clone());
 
-        let deduper: Option<Arc<dyn Deduper>> = if cfg.is_message_dedup_enabled() {
-            Some(MemoryDeduper::new(cfg.dedup.ttl_seconds))
+        // Go creates the deduper only when Dedup.Enabled; dispatch still gates on
+        // IsMessageDedupEnabled() && deduper != nil.
+        let deduper: Option<Arc<dyn Deduper>> = if cfg.dedup.enabled {
+            let ttl = if cfg.dedup.ttl_seconds > 0 {
+                cfg.dedup.ttl_seconds
+            } else {
+                3600
+            };
+            Some(MemoryDeduper::new(ttl))
         } else {
             None
         };

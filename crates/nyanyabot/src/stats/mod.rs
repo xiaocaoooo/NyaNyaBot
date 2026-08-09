@@ -59,11 +59,19 @@ impl Stats {
         if plugin_id.is_empty() {
             return;
         }
+        self.inc_plugin_sent_only(plugin_id);
+        self.inc_sent();
+    }
+
+    /// Per-plugin counter only (Go host.IncPluginSent); global sent is owned by reversews.
+    pub fn inc_plugin_sent_only(&self, plugin_id: &str) {
+        if plugin_id.is_empty() {
+            return;
+        }
         self.plugin_sent
             .entry(plugin_id.to_string())
             .or_insert_with(|| AtomicI64::new(0))
             .fetch_add(1, Ordering::Relaxed);
-        self.inc_sent();
     }
 
     pub fn inc_filtered_self(&self) {

@@ -196,7 +196,7 @@ async fn boot() -> (String, String, tempfile::TempDir) {
     let host = PluginHost::new(pm.clone(), store.clone(), stats.clone(), call_onebot)
         .await
         .unwrap();
-    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone());
+    let onebot = nyanyabot::onebot::reversews::Server::new(store.clone(), stats.clone());
     let trigger = nyanyabot::triggerlog::Recorder::new(&store.get().trigger_log);
     let web = WebServer::new(store, pm, stats, host, onebot, trigger, None);
     let web2 = web.clone();
