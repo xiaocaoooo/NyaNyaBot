@@ -1,0 +1,37 @@
+{
+  "name": "Echo",
+  "plugin_id": "external.echo",
+  "version": "0.2.0",
+  "author": "nyanyabot",
+  "description": "回声测试插件",
+  "dependencies": [],
+  "exports": [],
+  "config": {
+    "version": "1",
+    "description": "Echo plugin config",
+    "schema": {
+      "properties": {
+        "prefix": {
+          "default": "echo: ",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "default": {
+      "prefix": "echo: "
+    }
+  },
+  "commands": [
+    {
+      "name": "echo",
+      "id": "cmd.echo",
+      "description": "匹配 /echo xxx 并回声",
+      "pattern": "^echo\\s+(.+)$",
+      "match_raw": false,
+      "handler": "HandleEcho"
+    }
+  ],
+  "events": [],
+  "crons": []
+}

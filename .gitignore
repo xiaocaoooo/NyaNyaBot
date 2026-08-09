@@ -61,3 +61,10 @@ logs/
 
 internal/web/frontend/
 apidocs/
+
+/target/
+/plugins/
+/bin/
+/data/
+*.exe
+/nyanyabot

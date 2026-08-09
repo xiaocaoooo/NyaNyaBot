@@ -99,7 +99,7 @@ NapCat/OB11 的上报事件对象（示例 schema：`apidocs/downloads/246111213
 
 ## 4. 建议的数据结构（Go 侧表示，设计稿）
 
-> 注意：这是设计文档中的结构草案。实现时可用 `go-plugin` 的 gRPC / net/rpc 承载。
+> 注意：这是设计文档中的结构草案。实现使用 `nyanyabot-proto` 的 tonic gRPC（本机 127.0.0.1）。
 
 ### 4.1 Descriptor
 
@@ -256,7 +256,7 @@ Cron 表达式使用 [robfig/cron](https://github.com/robfig/cron) 库解析，�
 
 ## 7. RPC/ABI 形态（建议）
 
-考虑到 go-plugin 跨进程通信，建议插件对外暴露 3 个核心 RPC：
+插件 gRPC `PluginService` 固定方法（见 proto）：
 
 1. `Describe() -> PluginDescriptor`
 2. `Configure(config_json) -> void`

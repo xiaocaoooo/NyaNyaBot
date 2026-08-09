@@ -1,7 +1,10 @@
 services:
   nyanyabot:
-    build: .
-    container_name: nyanyabot
+    build:
+      context: ..
+      dockerfile: NyaNyaBot/Dockerfile
+    image: nyanyabot:rewrite-smoke
+    container_name: nyanyabot-rewrite-smoke
     ports:
       - "3000:3000"
       - "3001:3001"
