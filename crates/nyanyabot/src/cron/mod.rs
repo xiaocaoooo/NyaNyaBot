@@ -117,6 +117,7 @@ impl Scheduler {
         let plugin_id = plugin_id.to_string();
         let listener_id = cron_item.id.clone();
         let schedule_str = cron_item.schedule.clone();
+        let cron_name = cron_item.name.clone();
         let handle = tokio::spawn(async move {
             loop {
                 let cfg = store.get();
@@ -148,11 +149,23 @@ impl Scheduler {
                     &plugin_id,
                     &listener_id,
                     "cron",
-                    json!({"schedule": schedule_str}),
+                    json!({
+                        "schedule": schedule_str,
+                        "cron_name": cron_name,
+                    }),
                 );
                 info!(plugin_id = %plugin_id, cron_id = %listener_id, "cron fired");
                 let _ = host.ensure_awake(&plugin_id).await;
-                let event = json!({"post_type":"cron","cron_id": listener_id});
+                // Go buildCronEvent parity.
+                let event = json!({
+                    "post_type": "cron",
+                    "time": 0,
+                    "self_id": 0,
+                    "plugin_id": plugin_id,
+                    "cron_id": listener_id,
+                    "cron_name": cron_name,
+                    "cron_schedule": schedule_str,
+                });
                 let handle_res = plugin.handle(&listener_id, event, None, &trace_id).await;
                 let (ok, err_msg) = match &handle_res {
                     Ok(_) => (true, String::new()),

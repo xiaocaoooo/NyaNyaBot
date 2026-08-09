@@ -1010,10 +1010,8 @@ fn instance_ids_for(base_id: &str, cfg: &AppConfig, is_dependency: bool) -> Vec<
         return vec![base_id.to_string()];
     }
     let mut ids = multi_ids;
-    if has_base_configured || is_dependency {
-        if seen.insert(base_id.to_string()) {
-            ids.push(base_id.to_string());
-        }
+    if (has_base_configured || is_dependency) && seen.insert(base_id.to_string()) {
+        ids.push(base_id.to_string());
     }
     ids.sort();
     ids
@@ -1213,8 +1211,7 @@ mod tests {
     #[test]
     fn instance_ids_functional_multi_without_base() {
         let mut cfg = AppConfig::default();
-        cfg.plugins
-            .insert("external.echo@a".into(), json!({}));
+        cfg.plugins.insert("external.echo@a".into(), json!({}));
         assert_eq!(
             instance_ids_for("external.echo", &cfg, false),
             vec!["external.echo@a".to_string()]
@@ -1275,8 +1272,7 @@ mod tests {
         // Even though dependency plugins normally ignore @, if somehow multi were
         // collected, base would be forced. With is_dependency=true multi is empty.
         let mut cfg = AppConfig::default();
-        cfg.plugins
-            .insert("external.account@x".into(), json!({}));
+        cfg.plugins.insert("external.account@x".into(), json!({}));
         cfg.plugins.insert("external.account".into(), json!({}));
         assert_eq!(
             instance_ids_for("external.account", &cfg, true),

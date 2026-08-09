@@ -27,8 +27,8 @@ fn plugin_descriptor() -> Descriptor {
         plugin_id: "external.configdump".into(),
         version: "0.1.0".into(),
         author: "nyanyabot".into(),
-        description: "Test plugin: reply with the current runtime config (hot updated via Configure)"
-            .into(),
+        description:
+            "Test plugin: reply with the current runtime config (hot updated via Configure)".into(),
         exports: vec![ExportSpec {
             name: "configdump.snapshot".into(),
             description: "返回当前生效配置快照（供其他插件调用）".into(),
@@ -38,7 +38,9 @@ fn plugin_descriptor() -> Descriptor {
         config: Some(ConfigSpec {
             version: Some("1".into()),
             description: Some("ConfigDump plugin config".into()),
-            schema: Some(json!({"type":"object","properties":{"prefix":{"type":"string","description":"回复前缀（用于验证热更新是否生效）"}},"additionalProperties":true})),
+            schema: Some(
+                json!({"type":"object","properties":{"prefix":{"type":"string","description":"回复前缀（用于验证热更新是否生效）"}},"additionalProperties":true}),
+            ),
             default: Some(json!({"prefix":"CFG: "})),
         }),
         commands: vec![CommandListener {
@@ -91,9 +93,7 @@ impl Plugin for ConfigDumpPlugin {
             "prefix": st.prefix,
             "config": st.raw_config.clone(),
         });
-        if pretty
-            && let Ok(s) = serde_json::to_string_pretty(&st.raw_config)
-        {
+        if pretty && let Ok(s) = serde_json::to_string_pretty(&st.raw_config) {
             payload
                 .as_object_mut()
                 .unwrap()

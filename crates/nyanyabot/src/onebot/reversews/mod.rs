@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
@@ -10,11 +11,10 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
-use parking_lot::RwLock;
+use parking_lot::{Mutex as SyncMutex, RwLock};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -41,14 +41,47 @@ pub struct BotInfo {
     pub groups: Vec<Group>,
 }
 
+/// One reverse-WS connection. Shared for bootstrap + live API calls so pending
+/// responses always land on the same map (Go single-session parity).
 struct Session {
-    self_id: i64,
-    nickname: String,
+    self_id: AtomicI64,
+    nickname: RwLock<String>,
     remote: String,
     connected_at: chrono::DateTime<chrono::Utc>,
-    groups: Vec<Group>,
+    groups: RwLock<Vec<Group>>,
     tx: mpsc::UnboundedSender<Message>,
-    pending: Mutex<HashMap<String, oneshot::Sender<ApiResponse>>>,
+    pending: SyncMutex<HashMap<String, oneshot::Sender<ApiResponse>>>,
+    closed: AtomicBool,
+}
+
+impl Session {
+    fn close(&self, reason: &str) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // Drop pending waiters so callers fail fast.
+        self.pending.lock().clear();
+        let _ = self.tx.send(Message::Close(Some(CloseFrame {
+            code: 1000,
+            reason: reason.to_string().into(),
+        })));
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    fn info(&self) -> BotInfo {
+        let groups = self.groups.read().clone();
+        BotInfo {
+            self_id: self.self_id.load(Ordering::SeqCst),
+            nickname: self.nickname.read().clone(),
+            remote_addr: self.remote.clone(),
+            connected_at: self.connected_at,
+            group_count: groups.len(),
+            groups,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -85,18 +118,7 @@ impl Server {
     }
 
     pub fn get_bots(&self) -> Vec<BotInfo> {
-        self.sessions
-            .read()
-            .values()
-            .map(|s| BotInfo {
-                self_id: s.self_id,
-                nickname: s.nickname.clone(),
-                remote_addr: s.remote.clone(),
-                connected_at: s.connected_at,
-                group_count: s.groups.len(),
-                groups: s.groups.clone(),
-            })
-            .collect()
+        self.sessions.read().values().map(|s| s.info()).collect()
     }
 
     pub async fn call(&self, action: &str, params: Value) -> Result<ApiResponse> {
@@ -181,23 +203,26 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
         }
     });
 
+    // Single session object for the whole connection lifetime (Go parity).
     let session = Arc::new(Session {
-        self_id: 0,
-        nickname: String::new(),
+        self_id: AtomicI64::new(0),
+        nickname: RwLock::new(String::new()),
         remote: remote.clone(),
         connected_at: chrono::Utc::now(),
-        groups: Vec::new(),
+        groups: RwLock::new(Vec::new()),
         tx: tx.clone(),
-        pending: Mutex::new(HashMap::new()),
+        pending: SyncMutex::new(HashMap::new()),
+        closed: AtomicBool::new(false),
     });
 
-    // Bootstrap APIs first via temporary reader task using shared pending map.
-    let bootstrap_session = session.clone();
+    let reader_session = session.clone();
     let server_bg = server.clone();
     let dispatch_flag = dispatch_events.clone();
     let reader = tokio::spawn(async move {
-        let mut identified = 0i64;
         while let Some(Ok(msg)) = stream.next().await {
+            if reader_session.is_closed() {
+                break;
+            }
             let data = match msg {
                 Message::Text(t) => t.as_bytes().to_vec(),
                 Message::Binary(b) => b.to_vec(),
@@ -214,25 +239,18 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
                 && !status.is_empty()
                 && let Ok(resp) = serde_json::from_value::<ApiResponse>(probe.clone())
             {
-                if let Some(tx) = bootstrap_session.pending.lock().await.remove(echo) {
-                    let _ = tx.send(resp);
-                } else if identified != 0 {
-                    let sess = server_bg.sessions.read().get(&identified).cloned();
-                    if let Some(sess) = sess
-                        && let Some(tx) = sess.pending.lock().await.remove(echo)
-                    {
-                        let _ = tx.send(resp);
-                    }
+                if let Some(waiter) = reader_session.pending.lock().remove(echo) {
+                    let _ = waiter.send(resp);
                 }
                 continue;
             }
 
-            let mut event = probe;
-            if identified != 0 {
-                event = ensure_self_id(event, identified);
-            } else if let Some(id) = event_self_id(&event) {
-                identified = id;
-            }
+            let identified = reader_session.self_id.load(Ordering::SeqCst);
+            let event = if identified != 0 {
+                ensure_self_id(probe, identified)
+            } else {
+                probe
+            };
             if dispatch_flag.load(Ordering::Relaxed)
                 && let Some(handler) = server_bg.handler.read().clone()
             {
@@ -245,6 +263,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
         Ok(r) => r,
         Err(err) => {
             warn!(error = %err, "get_login_info failed");
+            session.close("login failed");
             write_task.abort();
             reader.abort();
             return;
@@ -259,10 +278,16 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
         .to_string();
     if user_id == 0 {
         warn!("invalid login info");
+        session.close("invalid login info");
         write_task.abort();
         reader.abort();
         return;
     }
+
+    // Publish identity immediately so ensure_self_id and pending routing work
+    // for the rest of the connection (including get_group_list + later CallOneBot).
+    session.self_id.store(user_id, Ordering::SeqCst);
+    *session.nickname.write() = nickname.clone();
 
     let cfg = server.store.get();
     if !cfg.bot_access.allowed(user_id) {
@@ -281,6 +306,7 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
         })));
         // Allow write task to flush close frame.
         tokio::time::sleep(Duration::from_millis(50)).await;
+        session.close("bot access denied");
         write_task.abort();
         reader.abort();
         return;
@@ -303,18 +329,21 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
             });
         }
     }
+    *session.groups.write() = groups;
 
-    let live = Arc::new(Session {
-        self_id: user_id,
-        nickname: nickname.clone(),
-        remote,
-        connected_at: chrono::Utc::now(),
-        groups,
-        tx,
-        pending: Mutex::new(HashMap::new()),
-    });
-    // Move any remaining pending waiters are on bootstrap session; fine for handshake completion.
-    server.sessions.write().insert(user_id, live);
+    // Register session; replace old connection for same self_id (Go parity).
+    let old = {
+        let mut map = server.sessions.write();
+        map.insert(user_id, session.clone())
+    };
+    if let Some(old) = old {
+        info!(
+            self_id = user_id,
+            old_remote = %old.remote,
+            "replacing old session"
+        );
+        old.close("replaced by new connection");
+    }
     {
         let mut def = server.default_bot.write();
         if def.is_none() {
@@ -325,10 +354,22 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
 
     let _ = reader.await;
     write_task.abort();
-    server.sessions.write().remove(&user_id);
+    session.close("connection closed");
+
+    // Only clear map entry if we are still the current session (Go pointer check).
+    {
+        let mut map = server.sessions.write();
+        let should_remove = map
+            .get(&user_id)
+            .map(|cur| Arc::ptr_eq(cur, &session))
+            .unwrap_or(false);
+        if should_remove {
+            map.remove(&user_id);
+        }
+    }
     {
         let mut def = server.default_bot.write();
-        if *def == Some(user_id) {
+        if *def == Some(user_id) && server.sessions.read().get(&user_id).is_none() {
             *def = server.sessions.read().keys().next().copied();
         }
     }
@@ -336,23 +377,30 @@ async fn handle_socket(server: Arc<Server>, socket: WebSocket, remote: String) {
 }
 
 async fn call_raw(session: &Session, action: &str, params: Value) -> Result<ApiResponse> {
+    if session.is_closed() {
+        bail!("session closed");
+    }
     let echo = Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
-    session.pending.lock().await.insert(echo.clone(), tx);
+    session.pending.lock().insert(echo.clone(), tx);
     let req = ApiRequest {
         action: action.to_string(),
         params: if params.is_null() { None } else { Some(params) },
         echo: Some(echo.clone()),
     };
-    session
+    if session
         .tx
         .send(Message::Text(serde_json::to_string(&req)?.into()))
-        .map_err(|_| anyhow!("ws send failed"))?;
+        .is_err()
+    {
+        session.pending.lock().remove(&echo);
+        bail!("ws send failed");
+    }
     match tokio::time::timeout(Duration::from_secs(30), rx).await {
         Ok(Ok(resp)) => Ok(resp),
         Ok(Err(_)) => bail!("canceled"),
         Err(_) => {
-            session.pending.lock().await.remove(&echo);
+            session.pending.lock().remove(&echo);
             bail!("timeout")
         }
     }
@@ -370,6 +418,7 @@ fn value_as_i64(v: &Value) -> i64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn event_self_id(event: &Value) -> Option<i64> {
     let n = json_i64(event, "self_id");
     if n == 0 { None } else { Some(n) }

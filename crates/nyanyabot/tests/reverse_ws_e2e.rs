@@ -212,3 +212,68 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
     let _ = tokio::time::timeout(Duration::from_secs(1), ob_task).await;
     client.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reverse_ws_call_onebot_after_register() {
+    // Regression: after login the host must still deliver API responses for
+    // CallOneBot / call_with_bot (shared pending map + identified self_id).
+    let dir = tempdir().unwrap();
+    let store = Store::new(dir.path()).unwrap();
+    store.load_or_create_default().unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    store
+        .update(|cfg| {
+            cfg.onebot.reverse_ws.listen_addr = addr.to_string();
+        })
+        .unwrap();
+
+    let onebot = ReverseWsServer::new(store.clone());
+    let ob = onebot.clone();
+    let ob_task = tokio::spawn(async move {
+        let _ = ob.start().await;
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let client = tokio::spawn(fake_onebot_session(addr, 7777, None));
+
+    let mut bot_ok = false;
+    for _ in 0..50 {
+        if onebot.get_bot_ids().contains(&7777) {
+            bot_ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(bot_ok, "bot should register");
+
+    let resp = tokio::time::timeout(
+        Duration::from_secs(5),
+        onebot.call_with_bot(7777, "send_group_msg", json!({"group_id":1,"message":"hi"})),
+    )
+    .await
+    .expect("call timeout — pending map likely broken after register")
+    .expect("call failed");
+    assert_eq!(resp.status, "ok");
+    assert_eq!(resp.retcode, 0);
+    assert_eq!(
+        resp.data.get("message_id").and_then(|v| v.as_i64()),
+        Some(1)
+    );
+
+    // Also exercise default single-bot call path.
+    let resp2 = tokio::time::timeout(
+        Duration::from_secs(5),
+        onebot.call("get_group_list", Value::Null),
+    )
+    .await
+    .expect("default call timeout")
+    .expect("default call failed");
+    assert_eq!(resp2.status, "ok");
+
+    onebot.shutdown().await;
+    let _ = tokio::time::timeout(Duration::from_secs(1), ob_task).await;
+    client.abort();
+}
