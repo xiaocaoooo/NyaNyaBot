@@ -31,7 +31,7 @@ const SESSION_COOKIE: &str = "nyanyabot_session";
 const SESSION_MAX_AGE: u64 = 30 * 24 * 60 * 60;
 
 #[derive(Embed)]
-#[folder = "src/web/frontend"]
+#[folder = "generated/frontend"]
 struct FrontendAssets;
 
 #[derive(Clone)]

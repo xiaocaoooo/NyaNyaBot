@@ -113,7 +113,7 @@ pnpm install
 pnpm build          # 生成 webui/out
 ```
 
-Rust 侧嵌入 `crates/nyanyabot/src/web/frontend`（有占位资源，避免无前端时无法编译测试）。生产镜像可把 `webui/out` 拷入该目录，或走 Docker 前端构建阶段。
+编译时由 `crates/nyanyabot/build.rs` 将 `webui/out` 同步到 gitignore 的 `generated/frontend` 并 `rust-embed`。若缺少 `webui/out`，则嵌入 `frontend-placeholder` 以便测试编译。生产请先 `pnpm build` 或 `cargo xtask frontend`；Docker 同样把 `webui/out` 提供给 build.rs。
 
 ## Docker
 

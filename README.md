@@ -113,7 +113,7 @@ pnpm install
 pnpm build          # writes webui/out
 ```
 
-The Rust build embeds `crates/nyanyabot/src/web/frontend` (placeholder assets exist so tests compile without a prior frontend build). For production images, copy `webui/out` into that folder or use the Docker frontend stage.
+At compile time, `crates/nyanyabot/build.rs` embeds `webui/out` into `generated/frontend` (gitignored). If `webui/out` is missing, it embeds `frontend-placeholder` so tests still compile. Production builds should run `pnpm build` or `cargo xtask frontend` first; Docker copies `webui/out` for the same path.
 
 ## Docker
 

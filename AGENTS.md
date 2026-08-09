@@ -3,7 +3,7 @@
 ## Stack
 - Rust 2024 workspace
 - Plugin transport: gRPC via `nyanyabot-proto` (`nyanyabot.plugin.v1`)
-- WebUI: `webui/` Next.js (TypeScript) retained
+- WebUI: `webui/` Next.js (TypeScript) retained; `crates/nyanyabot/build.rs` embeds `webui/out` (or `frontend-placeholder`) into `generated/frontend` at compile time
 - DB: PostgreSQL via `sqlx` (chat/trigger logs)
 
 ## Layout

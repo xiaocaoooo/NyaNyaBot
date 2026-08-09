@@ -213,7 +213,10 @@ async fn login_page_serves_login_html_not_dashboard() {
     assert_eq!(login.status, 200);
     let body = login.body_str();
     assert!(
-        body.contains("/login") || body.contains("app/login/"),
+        body.contains("nyanyabot-frontend-placeholder:login")
+            || body.contains("data-nyanyabot-page=\"login\"")
+            || body.contains("/login")
+            || body.contains("app/login/"),
         "login route html missing login markers; got {} bytes",
         login.body.len()
     );
@@ -286,8 +289,16 @@ async fn login_logout_flow_sets_and_clears_session() {
     assert_eq!(home.status, 200);
     let home_body = home.body_str();
     assert!(
-        !home_body.contains("/login") && !home_body.contains("app/login/"),
+        !home_body.contains("nyanyabot-frontend-placeholder:login")
+            && !home_body.contains("data-nyanyabot-page=\"login\"")
+            && !home_body.contains("app/login/"),
         "authenticated home should serve dashboard html, not login page"
+    );
+    assert!(
+        home_body.contains("nyanyabot-frontend-placeholder:home")
+            || home_body.contains("data-nyanyabot-page=\"home\"")
+            || home_body.contains("NyaNyaBot"),
+        "authenticated home missing home markers"
     );
 
     let logout = raw_http(
@@ -305,6 +316,51 @@ async fn login_logout_flow_sets_and_clears_session() {
         ),
     );
     assert_eq!(after.status, 401);
+
+    web.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugins_page_requires_auth_and_serves_html() {
+    let (web, addr, password) = start_web().await;
+
+    let unauth = raw_http(
+        &addr,
+        "GET /plugins/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(unauth.status, 302);
+    assert_eq!(
+        unauth.header("location"),
+        Some("/login/?next=%2Fplugins%2F")
+    );
+
+    let body = format!(r#"{{"password":"{password}"}}"#);
+    let login_req = format!(
+        "POST /api/auth/login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let login = raw_http(&addr, &login_req);
+    assert_eq!(login.status, 200, "body={}", login.body_str());
+    let set_cookie = login.header("set-cookie").expect("session cookie").to_string();
+    let session = set_cookie.split(';').next().unwrap().trim().to_string();
+
+    for path in ["/plugins/", "/plugins"] {
+        let page = raw_http(
+            &addr,
+            &format!(
+                "GET {path} HTTP/1.1\r\nHost: localhost\r\nCookie: {session}\r\nConnection: close\r\n\r\n"
+            ),
+        );
+        assert_eq!(page.status, 200, "path={path} body={}", page.body_str());
+        let html = page.body_str();
+        assert!(
+            html.contains("nyanyabot-frontend-placeholder:plugins")
+                || html.contains("data-nyanyabot-page=\"plugins\"")
+                || html.contains("app/plugins/")
+                || html.contains("/plugins"),
+            "plugins html missing markers for {path}"
+        );
+    }
 
     web.shutdown().await;
 }

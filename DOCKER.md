@@ -1,30 +1,25 @@
 # Docker
 
-Build from monorepo parent directory:
+Build from the monorepo parent (needs sibling `nyanyabot-proto`).
 
 ```bash
-# ensure frontend export exists (also used as Docker frontend stage input)
+# 1) export WebUI (required for a real console image; must include /plugins)
 cd NyaNyaBot/webui && pnpm build && cd ../..
+# or: cd NyaNyaBot && cargo xtask frontend
+
+# 2) image
 docker build -f NyaNyaBot/Dockerfile -t nyanyabot .
+
+# 3) run
+docker run --rm -p 3000:3000 -p 3001:3001 \
+  -v "$PWD/NyaNyaBot/data:/app/data" \
+  -v "$PWD/NyaNyaBot/plugins:/app/plugins" \
+  nyanyabot
 ```
 
-Or via compose (context is monorepo parent):
+## Notes
 
-```bash
-cd NyaNyaBot && docker compose build && docker compose up -d
-```
-
-Run:
-
-```bash
-docker run --rm -p 3000:3000 -p 3001:3001   -v "$PWD/NyaNyaBot/data:/app/data"   -v "$PWD/NyaNyaBot/plugins:/app/plugins"   nyanyabot
-```
-
-Ports:
-- `3000` WebUI
-- `3001` OneBot reverse WebSocket
-
-Notes:
-- Image runs as uid/gid 10001; mounted `data/` must be writable by that user.
-- Frontend stage uses Node 22 with host `webui/out` to avoid flaky Google Fonts CDN during image builds.
-- Rust stage uses 1.97; runtime is debian slim non-root.
+- Ports: `3000` WebUI, `3001` OneBot reverse WebSocket.
+- Frontend stage copies host `webui/out` into the image build context path expected by `crates/nyanyabot/build.rs` (`webui/out`). The Rust build embeds that export; it does **not** commit static files under `src/web/frontend`.
+- If `webui/out` is missing, `build.rs` falls back to `frontend-placeholder` (enough to compile/tests, not a full console).
+- Dockerfile requires `out/plugins/index.html` so `/plugins` cannot ship broken.

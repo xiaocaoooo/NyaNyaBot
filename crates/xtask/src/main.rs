@@ -8,15 +8,62 @@ fn main() -> anyhow::Result<()> {
     let cmd = args.next().unwrap_or_else(|| "help".into());
     match cmd.as_str() {
         "stage" => stage(),
+        "frontend" | "prepare-frontend" => frontend(),
         "help" | "--help" | "-h" => {
-            println!("xtask commands:\n  stage   build --release and copy binaries into plugins/");
+            println!(
+                "xtask commands:\n  \
+frontend   pnpm build in webui/ (writes webui/out for rust embed)\n  \
+stage      build --release and copy binaries into plugins/\n\n\
+Production tip: run `cargo xtask frontend` before `cargo build`/`stage` so the real WebUI is embedded."
+            );
             Ok(())
         }
         other => anyhow::bail!("unknown xtask command: {other}"),
     }
 }
 
+fn workspace_root() -> anyhow::Result<PathBuf> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    Ok(manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| anyhow::anyhow!("cannot resolve workspace root"))?
+        .to_path_buf())
+}
+
+fn frontend() -> anyhow::Result<()> {
+    let workspace = workspace_root()?;
+    let webui = workspace.join("webui");
+    if !webui.join("package.json").is_file() {
+        anyhow::bail!("webui/package.json not found at {}", webui.display());
+    }
+    let status = Command::new("pnpm")
+        .arg("build")
+        .current_dir(&webui)
+        .status()
+        .map_err(|err| anyhow::anyhow!("failed to spawn pnpm: {err}"))?;
+    if !status.success() {
+        anyhow::bail!("pnpm build failed");
+    }
+    let index = webui.join("out/index.html");
+    if !index.is_file() {
+        anyhow::bail!("pnpm build succeeded but {} is missing", index.display());
+    }
+    println!("frontend export ready at {}", webui.join("out").display());
+    Ok(())
+}
+
 fn stage() -> anyhow::Result<()> {
+    let workspace = workspace_root()?;
+    let out_index = workspace.join("webui/out/index.html");
+    if !out_index.is_file() {
+        eprintln!(
+            "warning: {} missing — release binary will embed frontend-placeholder.\n\
+Run `cargo xtask frontend` first for the real WebUI.",
+            out_index.display()
+        );
+    }
+
     let status = Command::new("cargo")
         .args([
             "build",
@@ -28,13 +75,12 @@ fn stage() -> anyhow::Result<()> {
             "-p",
             "nyanyabot-plugin-echo",
         ])
+        .current_dir(&workspace)
         .status()?;
     if !status.success() {
         anyhow::bail!("cargo build failed");
     }
 
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let workspace = manifest_dir.parent().unwrap().parent().unwrap();
     let target = workspace.join("target/release");
     let plugins = workspace.join("plugins");
     fs::create_dir_all(&plugins)?;
