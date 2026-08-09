@@ -524,6 +524,17 @@ impl Store {
             cfg.global_sleep_timeout = 60;
             changed = true;
         }
+        // Go normalize: default_policy allow, reject_behavior disconnect.
+        let dp = cfg.bot_access.default_policy.trim();
+        if dp != "allow" && dp != "deny" {
+            cfg.bot_access.default_policy = "allow".into();
+            changed = true;
+        }
+        let rb = cfg.bot_access.reject_behavior.trim();
+        if rb != "disconnect" && rb != "ignore" {
+            cfg.bot_access.reject_behavior = "disconnect".into();
+            changed = true;
+        }
         if cfg.trigger_log.queue_size <= 0 {
             cfg.trigger_log.queue_size = 1000;
             changed = true;
@@ -710,6 +721,16 @@ mod tests {
         };
         assert!(ac.allowed(1, 0));
         assert!(!ac.allowed(2, 0));
+    }
+
+    #[test]
+    fn bot_access_normalized_on_load() {
+        let dir = tempdir().unwrap();
+        let store = Store::new(dir.path()).unwrap();
+        let cfg = store.load_or_create_default().unwrap();
+        assert_eq!(cfg.bot_access.default_policy, "allow");
+        assert_eq!(cfg.bot_access.reject_behavior, "disconnect");
+        assert_eq!(cfg.global_sleep_timeout, 60);
     }
 
     #[test]
