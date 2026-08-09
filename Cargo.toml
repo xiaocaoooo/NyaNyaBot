@@ -4,6 +4,8 @@ members = [
     "crates/nyanyabot",
     "crates/nyanyabot-plugin-builtin-status",
     "crates/nyanyabot-plugin-echo",
+    "crates/nyanyabot-plugin-cron",
+    "crates/nyanyabot-plugin-configdump",
     "crates/xtask",
 ]
 default-members = ["crates/nyanyabot"]

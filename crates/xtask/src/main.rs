@@ -74,6 +74,10 @@ Run `cargo xtask frontend` first for the real WebUI.",
             "nyanyabot-plugin-builtin-status",
             "-p",
             "nyanyabot-plugin-echo",
+            "-p",
+            "nyanyabot-plugin-cron",
+            "-p",
+            "nyanyabot-plugin-configdump",
         ])
         .current_dir(&workspace)
         .status()?;
@@ -89,6 +93,8 @@ Run `cargo xtask frontend` first for the real WebUI.",
         "nyanyabot",
         "nyanyabot-plugin-builtin-status",
         "nyanyabot-plugin-echo",
+        "nyanyabot-plugin-cron",
+        "nyanyabot-plugin-configdump",
     ];
     for bin in bins {
         let mut src = target.join(bin);

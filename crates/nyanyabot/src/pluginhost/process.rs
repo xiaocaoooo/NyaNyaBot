@@ -249,8 +249,9 @@ impl PluginHost {
         let mut started: HashMap<String, RunningPlugin> = HashMap::new();
         let mut errors = Vec::new();
 
+        // Phase 1: probe all base descriptors to know dependency set (Go loadStartedCandidates).
+        let mut probes: Vec<(std::path::PathBuf, String, Vec<String>)> = Vec::new();
         for path in paths {
-            // Probe base plugin_id from descriptor.
             let probe = match self.start_plugin_process(&path, "").await {
                 Ok(p) => p,
                 Err(err) => {
@@ -259,10 +260,27 @@ impl PluginHost {
                 }
             };
             let base_id = probe.descriptor.plugin_id.clone();
-            // Drop probe process; instances start fresh with correct env/id.
+            let deps = probe.descriptor.dependencies.clone();
             let _ = self.discard_unregistered(probe).await;
+            probes.push((path, base_id, deps));
+        }
 
-            let instance_ids = instance_ids_for(&base_id, &cfg);
+        let mut dep_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for desc in self.pm.list().await {
+            for dep in desc.dependencies {
+                dep_set.insert(dep);
+            }
+        }
+        for (_, _, deps) in &probes {
+            for dep in deps {
+                dep_set.insert(dep.clone());
+            }
+        }
+
+        // Phase 2: start instances with Go multi-instance rules.
+        for (path, base_id, _) in probes {
+            let is_dependency = dep_set.contains(&base_id);
+            let instance_ids = instance_ids_for(&base_id, &cfg, is_dependency);
             for inst in instance_ids {
                 if existing.contains(&inst) || started.contains_key(&inst) {
                     errors.push(format!(
@@ -337,8 +355,19 @@ impl PluginHost {
         let cfg = self.store.get();
         let probe = self.start_plugin_process(&exe_path, "").await?;
         let base_id = probe.descriptor.plugin_id.clone();
+        let probe_deps = probe.descriptor.dependencies.clone();
         let _ = self.discard_unregistered(probe).await;
-        let instances = instance_ids_for(&base_id, &cfg);
+        let mut dep_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for desc in self.pm.list().await {
+            for dep in desc.dependencies {
+                dep_set.insert(dep);
+            }
+        }
+        for dep in probe_deps {
+            dep_set.insert(dep);
+        }
+        let is_dependency = dep_set.contains(&base_id);
+        let instances = instance_ids_for(&base_id, &cfg, is_dependency);
         let mut errors = Vec::new();
         let existing: std::collections::HashSet<String> =
             self.pm.plugin_ids().await.into_iter().collect();
@@ -959,17 +988,32 @@ fn sleep_timeout_for(cfg: &AppConfig, plugin_id: &str) -> i64 {
     }
 }
 
-fn instance_ids_for(base_id: &str, cfg: &AppConfig) -> Vec<String> {
+/// Resolve instance IDs to start for a probed base plugin.
+/// Go rules:
+/// - dependency plugins never multi-instance; always base only
+/// - functional plugins may start `base@name` from plugins/plugin_controls
+/// - when multi-instances exist, also start base iff base configured OR plugin is a dependency
+fn instance_ids_for(base_id: &str, cfg: &AppConfig, is_dependency: bool) -> Vec<String> {
     let prefix = format!("{base_id}@");
-    let mut ids = Vec::new();
+    let is_functional = !is_dependency;
+    let mut multi_ids = Vec::new();
+    let mut has_base_configured = false;
     let mut seen = std::collections::HashSet::new();
     for key in cfg.plugins.keys().chain(cfg.plugin_controls.keys()) {
-        if (key == base_id || key.starts_with(&prefix)) && seen.insert(key.clone()) {
-            ids.push(key.clone());
+        if key == base_id {
+            has_base_configured = true;
+        } else if is_functional && key.starts_with(&prefix) && seen.insert(key.clone()) {
+            multi_ids.push(key.clone());
         }
     }
-    if ids.is_empty() {
-        ids.push(base_id.to_string());
+    if multi_ids.is_empty() {
+        return vec![base_id.to_string()];
+    }
+    let mut ids = multi_ids;
+    if has_base_configured || is_dependency {
+        if seen.insert(base_id.to_string()) {
+            ids.push(base_id.to_string());
+        }
     }
     ids.sort();
     ids
@@ -1149,8 +1193,31 @@ mod tests {
     fn instance_ids_default_base() {
         let cfg = AppConfig::default();
         assert_eq!(
-            instance_ids_for("external.echo", &cfg),
+            instance_ids_for("external.echo", &cfg, false),
             vec!["external.echo".to_string()]
+        );
+    }
+
+    #[test]
+    fn instance_ids_dependency_ignores_at_suffix() {
+        let mut cfg = AppConfig::default();
+        cfg.plugins
+            .insert("external.screenshot@cdn".into(), json!({}));
+        // Dependencies never multi-instance.
+        assert_eq!(
+            instance_ids_for("external.screenshot", &cfg, true),
+            vec!["external.screenshot".to_string()]
+        );
+    }
+
+    #[test]
+    fn instance_ids_functional_multi_without_base() {
+        let mut cfg = AppConfig::default();
+        cfg.plugins
+            .insert("external.echo@a".into(), json!({}));
+        assert_eq!(
+            instance_ids_for("external.echo", &cfg, false),
+            vec!["external.echo@a".to_string()]
         );
     }
 
@@ -1191,7 +1258,7 @@ mod tests {
         );
         cfg.plugins.insert("external.echo".into(), json!({}));
         cfg.plugins.insert("external.echo@b".into(), json!({"x":1}));
-        let mut ids = instance_ids_for("external.echo", &cfg);
+        let mut ids = instance_ids_for("external.echo", &cfg, false);
         ids.sort();
         assert_eq!(
             ids,
@@ -1200,6 +1267,20 @@ mod tests {
                 "external.echo@a".to_string(),
                 "external.echo@b".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn instance_ids_dependency_forces_base_with_multi() {
+        // Even though dependency plugins normally ignore @, if somehow multi were
+        // collected, base would be forced. With is_dependency=true multi is empty.
+        let mut cfg = AppConfig::default();
+        cfg.plugins
+            .insert("external.account@x".into(), json!({}));
+        cfg.plugins.insert("external.account".into(), json!({}));
+        assert_eq!(
+            instance_ids_for("external.account", &cfg, true),
+            vec!["external.account".to_string()]
         );
     }
 
