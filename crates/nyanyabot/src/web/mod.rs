@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
@@ -27,6 +27,8 @@ use crate::pluginhost::PluginHost;
 use crate::stats::Stats;
 use crate::triggerlog::Recorder as TriggerRecorder;
 
+mod plugins_api;
+
 const SESSION_COOKIE: &str = "nyanyabot_session";
 const SESSION_MAX_AGE: u64 = 30 * 24 * 60 * 60;
 
@@ -39,15 +41,15 @@ pub struct WebServer {
     inner: Arc<WebInner>,
 }
 
-struct WebInner {
-    store: Arc<Store>,
-    pm: Arc<Manager>,
-    stats: Arc<Stats>,
-    host: Arc<PluginHost>,
-    reverse_ws: Arc<ReverseWsServer>,
-    trigger: Arc<TriggerRecorder>,
-    sessions: Mutex<HashMap<String, Instant>>,
-    shutdown: tokio::sync::Notify,
+pub(super) struct WebInner {
+    pub(super) store: Arc<Store>,
+    pub(super) pm: Arc<Manager>,
+    pub(super) stats: Arc<Stats>,
+    pub(super) host: Arc<PluginHost>,
+    pub(super) reverse_ws: Arc<ReverseWsServer>,
+    pub(super) trigger: Arc<TriggerRecorder>,
+    pub(super) sessions: Mutex<HashMap<String, Instant>>,
+    pub(super) shutdown: tokio::sync::Notify,
 }
 
 impl WebServer {
@@ -108,10 +110,10 @@ impl WebServer {
             )
             .route("/api/stats", get(api_stats))
             .route("/api/bots", get(api_bots))
-            .route("/api/plugins", get(api_plugins))
+            .route("/api/plugins", get(plugins_api::api_plugins))
             .route(
                 "/api/plugins/{*rest}",
-                get(api_plugin_sub).put(api_plugin_sub_put),
+                get(plugins_api::api_plugin_sub).put(plugins_api::api_plugin_sub_put),
             )
             .route("/api/trigger-logs", get(api_trigger_logs))
             .route("/api/trigger-logs/stats", get(api_trigger_logs_stats))
@@ -337,92 +339,6 @@ async fn api_stats(State(state): State<Arc<WebInner>>) -> impl IntoResponse {
 
 async fn api_bots(State(state): State<Arc<WebInner>>) -> impl IntoResponse {
     Json(json!({"bots": state.reverse_ws.get_bots()}))
-}
-
-async fn api_plugins(State(state): State<Arc<WebInner>>) -> impl IntoResponse {
-    let list = state.pm.list().await;
-    Json(json!({"plugins": list}))
-}
-
-async fn api_plugin_sub(State(state): State<Arc<WebInner>>, Path(rest): Path<String>) -> Response {
-    // rest like "{pluginID}/config" or "{pluginID}"
-    let parts: Vec<&str> = rest.trim_matches('/').split('/').collect();
-    if parts.is_empty() {
-        return (StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response();
-    }
-    let plugin_id = parts[0];
-    if parts.len() == 1 {
-        return match state.pm.get(plugin_id).await {
-            Some((_, d)) => Json(d).into_response(),
-            None => (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error":"plugin not found"})),
-            )
-                .into_response(),
-        };
-    }
-    if parts.get(1) == Some(&"config") {
-        let cfg = state.store.get();
-        let val = cfg.plugins.get(plugin_id).cloned().unwrap_or(json!({}));
-        return Json(val).into_response();
-    }
-    if parts.get(1) == Some(&"control") {
-        let cfg = state.store.get();
-        let val = cfg
-            .plugin_controls
-            .get(plugin_id)
-            .cloned()
-            .unwrap_or_default();
-        return Json(val).into_response();
-    }
-    (StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response()
-}
-
-async fn api_plugin_sub_put(
-    State(state): State<Arc<WebInner>>,
-    Path(rest): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    let parts: Vec<&str> = rest.trim_matches('/').split('/').collect();
-    if parts.len() < 2 {
-        return (StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response();
-    }
-    let plugin_id = parts[0].to_string();
-    match parts[1] {
-        "config" => {
-            match state.store.update(|cfg| {
-                cfg.plugins.insert(plugin_id.clone(), body.clone());
-            }) {
-                Ok(_) => {
-                    let _ = state.host.reconfigure_plugin(&plugin_id).await;
-                    Json(body).into_response()
-                }
-                Err(err) => (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": err.to_string()})),
-                )
-                    .into_response(),
-            }
-        }
-        "control" => match serde_json::from_value::<crate::config::PluginControl>(body.clone()) {
-            Ok(ctrl) => match state.store.update(|cfg| {
-                cfg.plugin_controls.insert(plugin_id.clone(), ctrl);
-            }) {
-                Ok(_) => Json(body).into_response(),
-                Err(err) => (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": err.to_string()})),
-                )
-                    .into_response(),
-            },
-            Err(err) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": err.to_string()})),
-            )
-                .into_response(),
-        },
-        _ => (StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response(),
-    }
 }
 
 async fn api_trigger_logs(State(state): State<Arc<WebInner>>) -> impl IntoResponse {

@@ -315,6 +315,13 @@ pub struct PluginControl {
     pub event_access: HashMap<String, AccessControl>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub command_overrides: HashMap<String, Vec<OverrideRule>>,
+    /// Overrides AppConfig.message_prefix matching for this plugin when non-empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub command_prefix: String,
+    /// nil = use host default (enabled); Some overrides auto-sleep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_sleep: Option<bool>,
+    /// None or 0 = use AppConfig.global_sleep_timeout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sleep_timeout: Option<i32>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -331,7 +338,9 @@ impl PluginControl {
             && self.command_access.is_empty()
             && self.event_access.is_empty()
             && self.command_overrides.is_empty()
-            && self.sleep_timeout.is_none()
+            && self.command_prefix.is_empty()
+            && self.enable_sleep.is_none()
+            && matches!(self.sleep_timeout, None | Some(0))
             && self.env.is_empty()
     }
 }
