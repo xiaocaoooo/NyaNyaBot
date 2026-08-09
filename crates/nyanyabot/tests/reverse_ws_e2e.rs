@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nyanyabot::config::Store;
+use nyanyabot::config::{PluginControl, Store};
 use nyanyabot::dispatch::Dispatcher;
 use nyanyabot::onebot::reversews::Server as ReverseWsServer;
 use nyanyabot::pluginhost::PluginHost;
@@ -97,6 +97,14 @@ async fn reverse_ws_login_event_dispatch_and_hot_reload() {
             cfg.onebot.reverse_ws.listen_addr = addr.to_string();
             cfg.plugins
                 .insert("external.echo".into(), json!({"prefix": "ws: "}));
+            // Go IsPluginEnabled defaults to disabled unless explicitly enabled.
+            cfg.plugin_controls.insert(
+                "external.echo".into(),
+                PluginControl {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            );
         })
         .unwrap();
 

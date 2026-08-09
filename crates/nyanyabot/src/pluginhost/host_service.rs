@@ -14,6 +14,7 @@ use std::sync::RwLock;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
+use crate::config::Store;
 use crate::onebot::ob11::ApiResponse;
 use crate::plugin::Manager;
 use crate::stats::Stats;
@@ -43,6 +44,7 @@ pub type EnsureAwakeFn = Arc<
 pub struct SharedHostState {
     pub plugin_manager: Arc<Manager>,
     pub stats: Arc<Stats>,
+    pub store: Arc<Store>,
     pub tokens: Arc<RwLock<HashMap<String, String>>>, // token -> plugin_id
     pub call_onebot: CallOneBotFn,
     pub plugin_sent: Arc<RwLock<HashMap<String, AtomicI64>>>,
@@ -122,6 +124,27 @@ impl HostService for HostServiceImpl {
             .plugin_id_for_token(&token)
             .ok_or_else(|| Status::unauthenticated("unknown plugin token"))?;
         let args = request.into_inner();
+        let cfg = self.state.store.get();
+        if !cfg.is_plugin_enabled(&caller) {
+            return Ok(Response::new(CallDependencyResponse {
+                result_json: Vec::new(),
+                error: Some(
+                    StructuredError::forbidden(format!("plugin {caller:?} is disabled")).to_pb(),
+                ),
+            }));
+        }
+        if !cfg.is_plugin_enabled(&args.target_plugin_id) {
+            return Ok(Response::new(CallDependencyResponse {
+                result_json: Vec::new(),
+                error: Some(
+                    StructuredError::forbidden(format!(
+                        "plugin {:?} is disabled",
+                        args.target_plugin_id
+                    ))
+                    .to_pb(),
+                ),
+            }));
+        }
 
         // Validate dependency declaration.
         let Some((_, caller_desc)) = self.state.plugin_manager.get(&caller).await else {

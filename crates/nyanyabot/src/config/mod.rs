@@ -346,11 +346,16 @@ impl PluginControl {
 }
 
 impl AppConfig {
+    /// Align with Go IsPluginEnabled: missing control or enabled=None => disabled.
     pub fn is_plugin_enabled(&self, plugin_id: &str) -> bool {
-        self.plugin_controls
-            .get(plugin_id)
-            .and_then(|c| c.enabled)
-            .unwrap_or(true)
+        let plugin_id = plugin_id.trim();
+        if plugin_id.is_empty() {
+            return false;
+        }
+        matches!(
+            self.plugin_controls.get(plugin_id).and_then(|c| c.enabled),
+            Some(true)
+        )
     }
 
     pub fn is_command_enabled(&self, plugin_id: &str, listener_id: &str) -> bool {
@@ -378,32 +383,17 @@ impl AppConfig {
         self.message_dedup.unwrap_or(self.dedup.enabled)
     }
 
+    /// Align with Go IsAllowed: only GlobalAccess is enforced.
+    /// Plugin/listener access maps remain stored for WebUI but are not applied at runtime.
     pub fn is_allowed(
         &self,
-        plugin_id: &str,
-        listener_id: &str,
-        is_command: bool,
+        _plugin_id: &str,
+        _listener_id: &str,
+        _is_command: bool,
         user_id: i64,
         group_id: i64,
     ) -> bool {
-        if !self.global_access.allowed(user_id, group_id) {
-            return false;
-        }
-        let Some(ctrl) = self.plugin_controls.get(plugin_id) else {
-            return true;
-        };
-        if !ctrl.access.allowed(user_id, group_id) {
-            return false;
-        }
-        let map = if is_command {
-            &ctrl.command_access
-        } else {
-            &ctrl.event_access
-        };
-        if let Some(ac) = map.get(listener_id) {
-            return ac.allowed(user_id, group_id);
-        }
-        true
+        self.global_access.allowed(user_id, group_id)
     }
 
     pub fn command_overrides(&self, plugin_id: &str, listener_id: &str) -> Vec<OverrideRule> {
@@ -744,6 +734,57 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.get().globals.get("a").unwrap(), "1");
+    }
+
+    #[test]
+    fn plugin_enabled_defaults_false_like_go() {
+        let mut cfg = AppConfig::default();
+        assert!(!cfg.is_plugin_enabled("external.echo"));
+        cfg.plugin_controls.insert(
+            "external.echo".into(),
+            PluginControl {
+                enabled: None,
+                ..Default::default()
+            },
+        );
+        assert!(!cfg.is_plugin_enabled("external.echo"));
+        cfg.plugin_controls.insert(
+            "external.echo".into(),
+            PluginControl {
+                enabled: Some(false),
+                ..Default::default()
+            },
+        );
+        assert!(!cfg.is_plugin_enabled("external.echo"));
+        cfg.plugin_controls.insert(
+            "external.echo".into(),
+            PluginControl {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(cfg.is_plugin_enabled("external.echo"));
+        assert!(!cfg.is_plugin_enabled(""));
+    }
+
+    #[test]
+    fn is_allowed_uses_only_global_access() {
+        let mut cfg = AppConfig::default();
+        cfg.global_access.blacklist_users = vec![7];
+        // Plugin-level whitelist would have allowed user 7 under old multilevel logic.
+        cfg.plugin_controls.insert(
+            "external.echo".into(),
+            PluginControl {
+                enabled: Some(true),
+                access: AccessControl {
+                    whitelist_users: vec![7],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        assert!(!cfg.is_allowed("external.echo", "cmd.x", true, 7, 1));
+        assert!(cfg.is_allowed("external.echo", "cmd.x", true, 8, 1));
     }
 
     #[test]

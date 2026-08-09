@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nyanyabot::config::{PluginControl, Store};
 use nyanyabot::onebot::ob11::ApiResponse;
 use nyanyabot::plugin::{Manager, Plugin};
 use nyanyabot::pluginhost::host_service::{HostServiceImpl, SharedHostState};
@@ -116,11 +117,33 @@ async fn host_service_token_and_dependency() {
         .unwrap();
 
     let stats = Stats::new();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path()).unwrap();
+    store.load_or_create_default().unwrap();
+    store
+        .update(|cfg| {
+            cfg.plugin_controls.insert(
+                "test.caller".into(),
+                PluginControl {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            );
+            cfg.plugin_controls.insert(
+                "test.dep".into(),
+                PluginControl {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            );
+        })
+        .unwrap();
     let onebot_calls = Arc::new(Mutex::new(0u32));
     let onebot_calls2 = onebot_calls.clone();
     let state = SharedHostState {
         plugin_manager: pm,
         stats: stats.clone(),
+        store,
         tokens: Arc::new(std::sync::RwLock::new(Default::default())),
         call_onebot: Arc::new(move |_, _, _, _| {
             let c = onebot_calls2.clone();

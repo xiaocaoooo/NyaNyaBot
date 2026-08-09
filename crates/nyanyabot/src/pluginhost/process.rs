@@ -86,6 +86,7 @@ impl PluginHost {
         let host_state = SharedHostState {
             plugin_manager: pm.clone(),
             stats: stats.clone(),
+            store: store.clone(),
             tokens: Arc::new(RwLock::new(HashMap::new())),
             call_onebot,
             plugin_sent: Arc::new(RwLock::new(HashMap::new())),
