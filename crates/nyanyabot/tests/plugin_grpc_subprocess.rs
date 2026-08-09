@@ -80,7 +80,7 @@ async fn subprocess_echo_handshake_describe_configure_handle() {
 
     let (plugin, _desc) = pm.get("external.echo").await.expect("get plugin");
     let st = plugin.status().await.expect("status");
-    assert_eq!(st, "OK");
+    assert_eq!(st, "Idle");
 
     // Handle echo command
     let event = json!({
@@ -153,7 +153,7 @@ async fn subprocess_wrong_token_rejected_and_graceful_close() {
     // Discover plugin listen addr by re-spawning is hard; instead verify host close is graceful
     // and status works before close.
     let (plugin, _) = pm.get("external.echo").await.unwrap();
-    assert_eq!(plugin.status().await.unwrap(), "OK");
+    assert_eq!(plugin.status().await.unwrap(), "Idle");
 
     // Direct wrong-token client against a freshly spawned plugin process
     let mut child = tokio::process::Command::new(&echo_bin)
@@ -236,7 +236,7 @@ async fn subprocess_crash_auto_restarts() {
         tokio::time::sleep(Duration::from_millis(250)).await;
         if pm.get("external.echo").await.is_some()
             && let Ok(st) = pm.get("external.echo").await.unwrap().0.status().await
-            && st == "OK"
+            && (st == "Idle" || st == "Running" || st == "OK")
         {
             ok = true;
             break;

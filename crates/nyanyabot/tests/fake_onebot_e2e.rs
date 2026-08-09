@@ -113,6 +113,6 @@ async fn fake_onebot_and_plugin_event_path() {
     assert!(ok, "expected send_private_msg from echo plugin");
 
     host.reconfigure_plugin("external.echo").await.unwrap();
-    assert_eq!(plugin.status().await.unwrap(), "OK");
+    assert_eq!(plugin.status().await.unwrap(), "Idle");
     host.close().await;
 }

@@ -429,6 +429,7 @@ impl PluginHost {
         let plugin_id = running.plugin_id.clone();
         let lazy = running.lazy.clone();
         let plugin_arc: Arc<dyn Plugin> = lazy.clone();
+        running.lazy.clear_crashed();
         self.pm.register(plugin_arc, desc.clone()).await?;
         self.by_path
             .lock()
@@ -625,6 +626,9 @@ impl PluginHost {
                 warn!(plugin_id = %plugin_id, %status, "plugin process exited; removing");
                 let exe = {
                     let guard = self.running.lock().await;
+                    if let Some(p) = guard.get(&plugin_id) {
+                        p.lazy.mark_crashed();
+                    }
                     guard.get(&plugin_id).map(|p| p.exe_path.clone())
                 };
                 self.pm.unregister(&plugin_id).await;

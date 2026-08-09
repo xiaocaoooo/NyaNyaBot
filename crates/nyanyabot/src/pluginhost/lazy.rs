@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -11,11 +11,16 @@ use tracing::{info, warn};
 use crate::plugin::Plugin;
 
 /// Wraps a plugin so it can be put to sleep after idle timeout and woken on demand.
+/// Status strings follow Go LazyPlugin: Sleeping / Idle / Running / Crashed.
 pub struct LazyPlugin {
     inner: Arc<dyn Plugin>,
     last_used: Mutex<Instant>,
     sleep_timeout_secs: AtomicI64,
     sleeping: Mutex<bool>,
+    /// In-flight handle/invoke/configure calls (Go activeCalls).
+    active_calls: AtomicU64,
+    /// Unexpected process death observed by host watcher.
+    crashed: Mutex<bool>,
     plugin_id: String,
 }
 
@@ -26,6 +31,8 @@ impl LazyPlugin {
             last_used: Mutex::new(Instant::now()),
             sleep_timeout_secs: AtomicI64::new(sleep_timeout_secs),
             sleeping: Mutex::new(false),
+            active_calls: AtomicU64::new(0),
+            crashed: Mutex::new(false),
             plugin_id,
         })
     }
@@ -33,15 +40,27 @@ impl LazyPlugin {
     pub fn touch(&self) {
         *self.last_used.lock().expect("lock") = Instant::now();
         *self.sleeping.lock().expect("lock") = false;
+        *self.crashed.lock().expect("lock") = false;
     }
 
     pub fn set_sleep_timeout(&self, secs: i64) {
         self.sleep_timeout_secs.store(secs, Ordering::Relaxed);
     }
 
+    pub fn mark_crashed(&self) {
+        *self.crashed.lock().expect("lock") = true;
+    }
+
+    pub fn clear_crashed(&self) {
+        *self.crashed.lock().expect("lock") = false;
+    }
+
     pub fn maybe_sleep(&self) -> bool {
         let timeout = self.sleep_timeout_secs.load(Ordering::Relaxed);
         if timeout <= 0 {
+            return false;
+        }
+        if self.active_calls.load(Ordering::Relaxed) > 0 {
             return false;
         }
         let idle = self.last_used.lock().expect("lock").elapsed();
@@ -67,6 +86,19 @@ impl LazyPlugin {
     pub fn inner(&self) -> Arc<dyn Plugin> {
         self.inner.clone()
     }
+
+    fn begin_call(&self) {
+        self.touch();
+        self.active_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn end_call(&self) {
+        let prev = self.active_calls.fetch_sub(1, Ordering::Relaxed);
+        if prev == 0 {
+            // underflow guard
+            self.active_calls.store(0, Ordering::Relaxed);
+        }
+    }
 }
 
 #[async_trait]
@@ -77,8 +109,10 @@ impl Plugin for LazyPlugin {
     }
 
     async fn configure(&self, config: Value) -> Result<(), StructuredError> {
-        self.touch();
-        self.inner.configure(config).await
+        self.begin_call();
+        let res = self.inner.configure(config).await;
+        self.end_call();
+        res
     }
 
     async fn invoke(
@@ -90,8 +124,10 @@ impl Plugin for LazyPlugin {
         if self.is_sleeping() {
             warn!(plugin_id = %self.plugin_id, "invoke while sleeping; caller should ensure_awake");
         }
-        self.touch();
-        self.inner.invoke(method, params, caller_plugin_id).await
+        self.begin_call();
+        let res = self.inner.invoke(method, params, caller_plugin_id).await;
+        self.end_call();
+        res
     }
 
     async fn handle(
@@ -104,19 +140,29 @@ impl Plugin for LazyPlugin {
         if self.is_sleeping() {
             warn!(plugin_id = %self.plugin_id, "handle while sleeping; caller should ensure_awake");
         }
-        self.touch();
-        self.inner
+        self.begin_call();
+        let res = self
+            .inner
             .handle(listener_id, event_raw, match_data, trace_id)
-            .await
+            .await;
+        self.end_call();
+        res
     }
 
     async fn status(&self) -> Result<String, StructuredError> {
+        // Do not touch/wake on status checks (Go parity).
         if self.is_sleeping() {
             return Ok("Sleeping".into());
         }
-        // Do not touch/wake on status checks.
+        if *self.crashed.lock().expect("lock") {
+            return Ok("Crashed".into());
+        }
+        if self.active_calls.load(Ordering::Relaxed) == 0 {
+            // Process may still be up; Go reports Idle when no active calls.
+            return Ok("Idle".into());
+        }
         match self.inner.status().await {
-            Ok(s) if s.trim().is_empty() => Ok("Idle".into()),
+            Ok(s) if s.trim().is_empty() => Ok("Running".into()),
             Ok(s) => Ok(s),
             Err(_) => Ok("Crashed".into()),
         }
@@ -177,5 +223,19 @@ mod tests {
         assert_eq!(lazy.status().await.unwrap(), "Sleeping");
         lazy.touch();
         assert!(!lazy.is_sleeping());
+        assert_eq!(lazy.status().await.unwrap(), "Idle");
+    }
+
+    #[tokio::test]
+    async fn status_idle_vs_crashed() {
+        let lazy = LazyPlugin::new("dummy".into(), Arc::new(Dummy), 60);
+        assert_eq!(lazy.status().await.unwrap(), "Idle");
+        lazy.mark_crashed();
+        assert_eq!(lazy.status().await.unwrap(), "Crashed");
+        lazy.clear_crashed();
+        lazy.begin_call();
+        assert_eq!(lazy.status().await.unwrap(), "Running");
+        lazy.end_call();
+        assert_eq!(lazy.status().await.unwrap(), "Idle");
     }
 }
