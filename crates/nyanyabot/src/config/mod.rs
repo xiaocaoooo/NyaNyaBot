@@ -530,6 +530,10 @@ impl Store {
             cfg.dedup.backend = "memory".into();
             changed = true;
         }
+        if cfg.global_sleep_timeout <= 0 {
+            cfg.global_sleep_timeout = 60;
+            changed = true;
+        }
         if cfg.trigger_log.queue_size <= 0 {
             cfg.trigger_log.queue_size = 1000;
             changed = true;

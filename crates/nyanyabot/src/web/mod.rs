@@ -437,7 +437,10 @@ async fn api_bots(State(state): State<Arc<WebInner>>) -> impl IntoResponse {
         "stats": {
             "recv_count": snap.recv_count,
             "sent_count": snap.sent_count,
+            "filtered_self_count": snap.filtered_self_count,
+            "filtered_non_group_count": snap.filtered_non_group_count,
             "dedup_count": snap.dedup_count,
+            "plugin_sent_stats": snap.plugin_sent_stats,
             "start_time": snap.start_time.to_rfc3339(),
             "uptime": snap.uptime,
         },

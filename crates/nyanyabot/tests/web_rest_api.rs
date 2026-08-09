@@ -294,6 +294,11 @@ async fn rest_contracts_globals_config_bots_trigger_override_info() {
     assert_eq!(bj["dedupe_key"], "group_id+real_seq");
     assert_eq!(bj["total_bots"], 0);
     assert!(bj["bots"].as_array().unwrap().is_empty());
+    assert!(bj["stats"]["filtered_self_count"].is_number());
+    assert!(bj["stats"]["filtered_non_group_count"].is_number());
+    assert!(bj["stats"]["recv_count"].is_number());
+    assert!(bj["global_recv_count"].is_number());
+    assert!(bj["global_uptime"].as_str().is_some());
 
     let logs = authed("GET", &addr, "/api/trigger-logs", &cookie, None);
     assert_eq!(logs.status, 200, "{}", logs.body_str());

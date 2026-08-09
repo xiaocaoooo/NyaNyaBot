@@ -99,18 +99,43 @@ impl Stats {
 }
 
 fn format_uptime(d: Duration) -> String {
+    // Align with Go stats.FormatDuration Chinese output.
     let total = d.as_secs();
     let days = total / 86400;
     let hours = (total % 86400) / 3600;
     let mins = (total % 3600) / 60;
     let secs = total % 60;
+    let mut parts = Vec::new();
     if days > 0 {
-        format!("{days}d{hours}h{mins}m{secs}s")
-    } else if hours > 0 {
-        format!("{hours}h{mins}m{secs}s")
-    } else if mins > 0 {
-        format!("{mins}m{secs}s")
-    } else {
-        format!("{secs}s")
+        parts.push(format!("{days}天"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}小时"));
+    }
+    if mins > 0 {
+        parts.push(format!("{mins}分"));
+    }
+    if secs > 0 || parts.is_empty() {
+        parts.push(format!("{secs}秒"));
+    }
+    parts.concat()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uptime_chinese() {
+        assert_eq!(format_uptime(Duration::from_secs(12)), "12秒");
+        assert_eq!(format_uptime(Duration::from_secs(60 + 34)), "1分34秒");
+        assert_eq!(
+            format_uptime(Duration::from_secs(12 * 3600 + 45 * 60 + 23)),
+            "12小时45分23秒"
+        );
+        assert_eq!(
+            format_uptime(Duration::from_secs(23 * 86400 + 23 * 3600 + 23 * 60 + 23)),
+            "23天23小时23分23秒"
+        );
     }
 }
