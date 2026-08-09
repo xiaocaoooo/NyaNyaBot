@@ -6,7 +6,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -144,7 +144,12 @@ async fn auth_middleware(
         .map(|p| p.as_str())
         .unwrap_or("/");
     let loc = format!("/login/?next={}", urlencoding_minimal(next_q));
-    Redirect::temporary(&loc).into_response()
+    // Match historical Go behavior (302 Found) for unauthenticated HTML navigations.
+    (
+        StatusCode::FOUND,
+        [(header::LOCATION, loc)],
+    )
+        .into_response()
 }
 
 fn is_public_path(path: &str) -> bool {
@@ -445,25 +450,50 @@ async fn api_info(State(state): State<Arc<WebInner>>) -> impl IntoResponse {
 }
 
 async fn static_or_spa(req: Request<Body>) -> Response {
-    let path = req.uri().path().trim_start_matches('/');
-    let candidate = if path.is_empty() { "index.html" } else { path };
-    if let Some(file) = FrontendAssets::get(candidate) {
-        let mime = mime_guess::from_path(candidate).first_or_octet_stream();
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, mime.essence_str())
-            .body(Body::from(file.data.into_owned()))
-            .unwrap();
+    let path = req.uri().path();
+    for candidate in frontend_asset_candidates(path) {
+        if let Some(file) = FrontendAssets::get(&candidate) {
+            return embedded_file_response(&candidate, file.data.into_owned(), StatusCode::OK);
+        }
     }
-    // SPA fallback
-    if let Some(file) = FrontendAssets::get("index.html") {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(file.data.into_owned()))
-            .unwrap();
+
+    // Static export is multi-page; unknown routes should be 404, not the dashboard shell.
+    // Falling back to index.html previously served the home page for "/login/" and broke auth UX.
+    if let Some(file) = FrontendAssets::get("404.html") {
+        return embedded_file_response("404.html", file.data.into_owned(), StatusCode::NOT_FOUND);
     }
     (StatusCode::NOT_FOUND, "not found").into_response()
+}
+
+fn frontend_asset_candidates(uri_path: &str) -> Vec<String> {
+    let path = uri_path.trim_start_matches('/');
+    if path.is_empty() {
+        return vec!["index.html".into()];
+    }
+
+    let mut candidates = vec![path.to_string()];
+    if path.ends_with('/') {
+        candidates.push(format!("{path}index.html"));
+    } else {
+        candidates.push(format!("{path}/index.html"));
+        if !path.ends_with(".html") {
+            candidates.push(format!("{path}.html"));
+        }
+    }
+    candidates
+}
+
+fn embedded_file_response(path: &str, bytes: Vec<u8>, status: StatusCode) -> Response {
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let mut content_type = mime.essence_str().to_string();
+    if content_type == "text/html" {
+        content_type = "text/html; charset=utf-8".into();
+    }
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, content_type)
+        .body(Body::from(bytes))
+        .unwrap()
 }
 
 fn secure_eq(a: &str, b: &str) -> bool {
