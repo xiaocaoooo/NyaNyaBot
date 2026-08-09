@@ -73,6 +73,22 @@ impl Dispatcher {
             return;
         }
 
+        if post_type == "message" && message_type == "group" {
+            let group_name = resolve_group_name(&raw, self.reverse_ws.as_deref(), group_id);
+            let user_name = extract_user_display_name(&raw);
+            let message_text = resolve_message_text(&raw, &content);
+            let real_seq = get_real_seq_string(&raw);
+            info!(
+                group_name = %group_name,
+                group_id,
+                user_name = %user_name,
+                user_id,
+                message = %message_text,
+                real_seq = %real_seq,
+                "message received"
+            );
+        }
+
         let (event_key, event_key_full) = compute_event_keys(&raw);
         let entries = self.pm.entries().await;
 
@@ -361,6 +377,47 @@ fn strip_message_prefix(input: &str, pattern: &str) -> Option<String> {
     Some(input[full.end()..].to_string())
 }
 
+
+fn extract_user_display_name(raw: &Value) -> String {
+    let Some(sender) = raw.get("sender").and_then(|v| v.as_object()) else {
+        return String::new();
+    };
+    if let Some(card) = sender.get("card").and_then(|v| v.as_str()) {
+        let card = card.trim();
+        if !card.is_empty() {
+            return card.to_string();
+        }
+    }
+    sender
+        .get("nickname")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+fn resolve_message_text(raw: &Value, content: &str) -> String {
+    let raw_message = get_string(raw, "raw_message");
+    if !raw_message.is_empty() {
+        raw_message
+    } else {
+        content.to_string()
+    }
+}
+
+fn resolve_group_name(
+    raw: &Value,
+    reverse_ws: Option<&ReverseWsServer>,
+    group_id: i64,
+) -> String {
+    let from_event = get_string(raw, "group_name");
+    if !from_event.trim().is_empty() {
+        return from_event;
+    }
+    reverse_ws
+        .and_then(|ws| ws.lookup_group_name(group_id))
+        .unwrap_or_default()
+}
+
 /// Align with Go computeEventKeys / designs §5:
 /// - key = post_type
 /// - full = post_type + detail type only (no sub_type)
@@ -518,5 +575,59 @@ mod tests {
             "message": "plain-message"
         }));
         assert_eq!(c2, "plain-message");
+    }
+
+    #[test]
+    fn user_display_name_prefers_card() {
+        assert_eq!(
+            extract_user_display_name(&json!({
+                "sender": {"card": "Card", "nickname": "Nick"}
+            })),
+            "Card"
+        );
+        assert_eq!(
+            extract_user_display_name(&json!({
+                "sender": {"card": "  ", "nickname": "Nick"}
+            })),
+            "Nick"
+        );
+        assert_eq!(
+            extract_user_display_name(&json!({
+                "sender": {"nickname": "Nick"}
+            })),
+            "Nick"
+        );
+        assert_eq!(extract_user_display_name(&json!({})), "");
+    }
+
+    #[test]
+    fn message_text_prefers_raw_message() {
+        assert_eq!(
+            resolve_message_text(
+                &json!({"raw_message": "raw", "message": "plain"}),
+                "from-content"
+            ),
+            "raw"
+        );
+        assert_eq!(
+            resolve_message_text(&json!({"raw_message": ""}), "from-content"),
+            "from-content"
+        );
+    }
+
+    #[test]
+    fn group_name_from_event_without_ws() {
+        assert_eq!(
+            resolve_group_name(
+                &json!({"group_name": "G1"}),
+                None,
+                1
+            ),
+            "G1"
+        );
+        assert_eq!(
+            resolve_group_name(&json!({}), None, 1),
+            ""
+        );
     }
 }

@@ -124,6 +124,24 @@ impl Server {
         self.sessions.read().values().map(|s| s.info()).collect()
     }
 
+    /// Lookup group_name from reverse-WS get_group_list cache across connected bots.
+    pub fn lookup_group_name(&self, group_id: i64) -> Option<String> {
+        if group_id <= 0 {
+            return None;
+        }
+        for session in self.sessions.read().values() {
+            for g in session.groups.read().iter() {
+                if g.group_id == group_id {
+                    let name = g.group_name.trim();
+                    if !name.is_empty() {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub async fn call(&self, action: &str, params: Value) -> Result<ApiResponse> {
         let ids = self.get_bot_ids();
         match ids.as_slice() {
