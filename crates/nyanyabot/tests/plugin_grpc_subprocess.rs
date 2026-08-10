@@ -362,3 +362,99 @@ async fn subprocess_start_timeout_fails_fast() {
     );
     host.close().await;
 }
+
+/// Regression: idle-stop restarts replace the Manager Arc. Callers must use the
+/// post-wake handle (ensure_awake_plugin), not a pre-wake snapshot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subprocess_idle_sleep_fresh_handle_after_wake() {
+    let echo_bin = ensure_plugin_bin("nyanyabot-plugin-echo");
+    let dir = tempdir().unwrap();
+    let store = Store::new(dir.path()).unwrap();
+    store.load_or_create_default().unwrap();
+    let pm = nyanyabot::plugin::Manager::new();
+    let stats = Stats::new();
+    let host = PluginHost::new(pm.clone(), store, stats, dummy_call_onebot())
+        .await
+        .unwrap();
+    host.load_exec(&ensure_plugin_bin("nyanyabot-plugin-configdump"))
+        .await
+        .unwrap();
+    host.load_exec(&echo_bin).await.unwrap();
+    host.set_plugin_sleep_timeout("external.echo", 1)
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(
+        host.plugin_is_sleeping("external.echo").await,
+        "plugin should be marked sleeping after idle timeout"
+    );
+    assert!(
+        host.plugin_os_pid("external.echo").await.is_none(),
+        "idle sleep should stop the plugin process"
+    );
+
+    // Snapshot taken while sleeping — this is the stale Arc dispatch used to keep.
+    let stale = pm.get("external.echo").await.expect("registered while sleeping").0;
+
+    // Wake + fetch live handle (the API dispatch/cron now use).
+    let live = host
+        .ensure_awake_plugin("external.echo")
+        .await
+        .expect("wake should succeed");
+    assert!(
+        !Arc::ptr_eq(&stale, &live),
+        "wake must re-register a new plugin Arc (stale snapshot must not be reused)"
+    );
+    assert!(
+        !host.plugin_is_sleeping("external.echo").await,
+        "plugin should be awake after ensure_awake_plugin"
+    );
+    assert!(
+        host.plugin_os_pid("external.echo").await.is_some(),
+        "process should be running after wake"
+    );
+
+    // Live handle must accept RPC; stale handle points at the dead process.
+    let match_data = nyanyabot_proto::CommandMatch {
+        full: "echo hi-after-wake".into(),
+        groups: vec!["hi-after-wake".into()],
+    };
+    let event = json!({
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 42,
+        "user_id": 7,
+        "self_id": 1,
+        "raw_message": "/echo hi-after-wake",
+        "message": [{"type":"text","data":{"text":"/echo hi-after-wake"}}],
+    });
+    live
+        .handle("cmd.echo", event, Some(match_data), "trace-wake")
+        .await
+        .expect("fresh handle after wake must succeed");
+
+    // Stale handle should fail (dead gRPC client) — documents the bug we fixed at call sites.
+    let stale_event = json!({
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 42,
+        "user_id": 7,
+        "self_id": 1,
+        "raw_message": "/echo stale",
+        "message": [{"type":"text","data":{"text":"/echo stale"}}],
+    });
+    let stale_match = nyanyabot_proto::CommandMatch {
+        full: "echo stale".into(),
+        groups: vec!["stale".into()],
+    };
+    let stale_err = stale
+        .handle("cmd.echo", stale_event, Some(stale_match), "trace-stale")
+        .await;
+    assert!(
+        stale_err.is_err(),
+        "stale pre-wake handle must not successfully talk to the new process"
+    );
+
+    host.close().await;
+}

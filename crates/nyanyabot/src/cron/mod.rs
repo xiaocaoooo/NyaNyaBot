@@ -135,14 +135,9 @@ impl Scheduler {
                     .to_std()
                     .unwrap_or(std::time::Duration::from_secs(1));
                 tokio::time::sleep(dur).await;
-                let Some((_, _, plugin)) = pm
-                    .entries()
-                    .await
-                    .into_iter()
-                    .find(|(id, _, _)| id == &plugin_id)
-                else {
+                if pm.get(&plugin_id).await.is_none() {
                     break;
-                };
+                }
                 let trace_id = host.generate_trace_id();
                 host.begin_trace(
                     &trace_id,
@@ -155,18 +150,26 @@ impl Scheduler {
                     }),
                 );
                 info!(plugin_id = %plugin_id, cron_id = %listener_id, "cron fired");
-                let _ = host.ensure_awake(&plugin_id).await;
-                // Go buildCronEvent parity.
-                let event = json!({
-                    "post_type": "cron",
-                    "time": 0,
-                    "self_id": 0,
-                    "plugin_id": plugin_id,
-                    "cron_id": listener_id,
-                    "cron_name": cron_name,
-                    "cron_schedule": schedule_str,
-                });
-                let handle_res = plugin.handle(&listener_id, event, None, &trace_id).await;
+                // ensure_awake may restart and re-register; fetch live handle after wake.
+                let handle_res = match host.ensure_awake_plugin(&plugin_id).await {
+                    Ok(live) => {
+                        // Go buildCronEvent parity.
+                        let event = json!({
+                            "post_type": "cron",
+                            "time": 0,
+                            "self_id": 0,
+                            "plugin_id": plugin_id,
+                            "cron_id": listener_id,
+                            "cron_name": cron_name,
+                            "cron_schedule": schedule_str,
+                        });
+                        live.handle(&listener_id, event, None, &trace_id).await
+                    }
+                    Err(err) => {
+                        warn!(plugin_id = %plugin_id, error = %err, "ensure_awake failed");
+                        Err(nyanyabot_proto::StructuredError::internal(err.to_string()))
+                    }
+                };
                 let (ok, err_msg) = match &handle_res {
                     Ok(_) => (true, String::new()),
                     Err(err) => {

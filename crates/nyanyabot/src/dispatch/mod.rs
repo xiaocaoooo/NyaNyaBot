@@ -94,7 +94,7 @@ impl Dispatcher {
 
         // Event listeners (all post types that match)
         let event_raw = inject_content_field(&raw, &content);
-        for (pid, desc, plugin) in &entries {
+        for (pid, desc, _plugin) in &entries {
             if !cfg.is_plugin_enabled(pid) {
                 continue;
             }
@@ -134,10 +134,15 @@ impl Dispatcher {
                     }),
                 );
                 info!(plugin_id = %pid, event_id = %l.id, event_type = %event_key, "event dispatched");
-                if let Err(err) = self.host.ensure_awake(pid).await {
-                    warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
-                }
-                let handle_res = plugin.handle(&l.id, payload, None, &trace_id).await;
+                // ensure_awake may restart and re-register a fresh Arc; never reuse the
+                // snapshotted `plugin` from entries() after wake.
+                let handle_res = match self.host.ensure_awake_plugin(pid).await {
+                    Ok(live) => live.handle(&l.id, payload, None, &trace_id).await,
+                    Err(err) => {
+                        warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
+                        Err(nyanyabot_proto::StructuredError::internal(err.to_string()))
+                    }
+                };
                 let (ok, err_msg) = match &handle_res {
                     Ok(_) => (true, String::new()),
                     Err(err) => {
@@ -176,7 +181,7 @@ impl Dispatcher {
         let raw_message = get_string(&raw, "raw_message");
         let command_raw = inject_content_field(&raw, &content);
 
-        for (pid, desc, plugin) in &entries {
+        for (pid, desc, _plugin) in &entries {
             if !cfg.is_plugin_enabled(pid) {
                 continue;
             }
@@ -259,12 +264,18 @@ impl Dispatcher {
                     }),
                 );
                 info!(plugin_id = %pid, command_id = %l.id, "command matched");
-                if let Err(err) = self.host.ensure_awake(pid).await {
-                    warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
-                }
-                let handle_res = plugin
-                    .handle(&l.id, command_raw.clone(), Some(match_data), &trace_id)
-                    .await;
+                // ensure_awake may restart and re-register a fresh Arc; never reuse the
+                // snapshotted `plugin` from entries() after wake.
+                let handle_res = match self.host.ensure_awake_plugin(pid).await {
+                    Ok(live) => {
+                        live.handle(&l.id, command_raw.clone(), Some(match_data), &trace_id)
+                            .await
+                    }
+                    Err(err) => {
+                        warn!(plugin_id = %pid, error = %err, "ensure_awake failed");
+                        Err(nyanyabot_proto::StructuredError::internal(err.to_string()))
+                    }
+                };
                 let (ok, err_msg) = match &handle_res {
                     Ok(_) => (true, String::new()),
                     Err(err) => {

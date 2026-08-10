@@ -739,6 +739,10 @@ impl PluginHost {
     }
 
     /// Wake a sleeping plugin process if needed (used before handle/invoke).
+    ///
+    /// Idle-stop restarts replace the registered plugin Arc. Callers that already
+    /// hold a Manager snapshot must re-fetch (or use [`Self::ensure_awake_plugin`])
+    /// before handle/invoke, otherwise they talk to a dead gRPC client.
     pub async fn ensure_awake(self: &Arc<Self>, plugin_id: &str) -> Result<()> {
         let (sleeping, exe, alive) = {
             let guard = self.running.lock().await;
@@ -755,6 +759,22 @@ impl PluginHost {
             self.restart_plugin_at(&exe, plugin_id).await?;
         }
         Ok(())
+    }
+
+    /// Wake if needed and return the currently registered plugin handle.
+    ///
+    /// Prefer this over `ensure_awake` + a previously snapshotted `Manager` entry:
+    /// restart replaces the Arc in the manager.
+    pub async fn ensure_awake_plugin(
+        self: &Arc<Self>,
+        plugin_id: &str,
+    ) -> Result<Arc<dyn Plugin>> {
+        self.ensure_awake(plugin_id).await?;
+        self.pm
+            .get(plugin_id)
+            .await
+            .map(|(plugin, _)| plugin)
+            .ok_or_else(|| anyhow!("plugin not registered after wake: {plugin_id}"))
     }
 
     pub async fn restart_plugins(self: &Arc<Self>, plugin_ids: Option<Vec<String>>) -> Result<()> {
