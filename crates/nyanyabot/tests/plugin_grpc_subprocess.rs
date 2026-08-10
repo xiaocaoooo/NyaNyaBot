@@ -395,7 +395,11 @@ async fn subprocess_idle_sleep_fresh_handle_after_wake() {
     );
 
     // Snapshot taken while sleeping — this is the stale Arc dispatch used to keep.
-    let stale = pm.get("external.echo").await.expect("registered while sleeping").0;
+    let stale = pm
+        .get("external.echo")
+        .await
+        .expect("registered while sleeping")
+        .0;
 
     // Wake + fetch live handle (the API dispatch/cron now use).
     let live = host
@@ -429,8 +433,7 @@ async fn subprocess_idle_sleep_fresh_handle_after_wake() {
         "raw_message": "/echo hi-after-wake",
         "message": [{"type":"text","data":{"text":"/echo hi-after-wake"}}],
     });
-    live
-        .handle("cmd.echo", event, Some(match_data), "trace-wake")
+    live.handle("cmd.echo", event, Some(match_data), "trace-wake")
         .await
         .expect("fresh handle after wake must succeed");
 

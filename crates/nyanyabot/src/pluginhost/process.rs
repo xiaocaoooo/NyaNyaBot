@@ -778,10 +778,7 @@ impl PluginHost {
     ///
     /// Prefer this over `ensure_awake` + a previously snapshotted `Manager` entry:
     /// restart replaces the Arc in the manager.
-    pub async fn ensure_awake_plugin(
-        self: &Arc<Self>,
-        plugin_id: &str,
-    ) -> Result<Arc<dyn Plugin>> {
+    pub async fn ensure_awake_plugin(self: &Arc<Self>, plugin_id: &str) -> Result<Arc<dyn Plugin>> {
         self.ensure_awake(plugin_id).await?;
         self.pm
             .get(plugin_id)

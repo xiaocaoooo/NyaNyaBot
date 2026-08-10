@@ -410,7 +410,6 @@ fn strip_message_prefix(input: &str, pattern: &str) -> Option<String> {
     Some(input[full.end()..].to_string())
 }
 
-
 fn extract_user_display_name(raw: &Value) -> String {
     let Some(sender) = raw.get("sender").and_then(|v| v.as_object()) else {
         return String::new();
@@ -437,11 +436,7 @@ fn resolve_message_text(raw: &Value, content: &str) -> String {
     }
 }
 
-fn resolve_group_name(
-    raw: &Value,
-    reverse_ws: Option<&ReverseWsServer>,
-    group_id: i64,
-) -> String {
+fn resolve_group_name(raw: &Value, reverse_ws: Option<&ReverseWsServer>, group_id: i64) -> String {
     let from_event = get_string(raw, "group_name");
     if !from_event.trim().is_empty() {
         return from_event;
@@ -651,16 +646,9 @@ mod tests {
     #[test]
     fn group_name_from_event_without_ws() {
         assert_eq!(
-            resolve_group_name(
-                &json!({"group_name": "G1"}),
-                None,
-                1
-            ),
+            resolve_group_name(&json!({"group_name": "G1"}), None, 1),
             "G1"
         );
-        assert_eq!(
-            resolve_group_name(&json!({}), None, 1),
-            ""
-        );
+        assert_eq!(resolve_group_name(&json!({}), None, 1), "");
     }
 }

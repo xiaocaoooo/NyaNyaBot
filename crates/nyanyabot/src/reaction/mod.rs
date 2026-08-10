@@ -289,11 +289,7 @@ pub fn extract_message_id(event: &Value) -> Value {
             if s.is_empty() || s == "0" {
                 Value::Null
             } else if let Ok(n) = s.parse::<i64>() {
-                if n == 0 {
-                    Value::Null
-                } else {
-                    json!(n)
-                }
+                if n == 0 { Value::Null } else { json!(n) }
             } else {
                 json!(s)
             }
