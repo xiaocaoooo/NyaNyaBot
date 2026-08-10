@@ -97,8 +97,10 @@ impl Plugin for CronTimePlugin {
                 let gid = self.config.read().group_id;
                 let reply = format!("已设置发送时间的群号为: {gid}");
                 if let Some(mut host) = self.host.read().await.clone() {
+                    let _ = host.report_command_effective(trace_id).await;
                     send_message(&mut host, &event_raw, &reply, trace_id).await;
                 }
+                return Ok(HandleResult::handled());
             }
             "cron.send_time" => {
                 let gid = self.config.read().group_id;
@@ -122,7 +124,7 @@ impl Plugin for CronTimePlugin {
                         .await;
                 }
             }
-            _ => {}
+            _ => return Ok(HandleResult::default()),
         }
         Ok(HandleResult::default())
     }

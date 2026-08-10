@@ -278,7 +278,7 @@ impl HostService for HostServiceImpl {
     ) -> Result<Response<ReportCommandProgressResponse>, Status> {
         let token = nyanyabot_proto::extract_token(&request)
             .ok_or_else(|| Status::unauthenticated("missing plugin token"))?;
-        let _caller = self
+        let caller = self
             .state
             .plugin_id_for_token(&token)
             .ok_or_else(|| Status::unauthenticated("unknown plugin token"))?;
@@ -294,8 +294,12 @@ impl HostService for HostServiceImpl {
                 args.stage
             )));
         }
-        if !self.state.command_reactions.mark_effective(trace_id) {
-            // Unknown trace: ignore softly (plugin may race after host cleaned up).
+        if !self
+            .state
+            .command_reactions
+            .mark_effective_for_plugin(trace_id, &caller)
+        {
+            // Unknown trace or plugin mismatch: ignore softly.
             return Ok(Response::new(ReportCommandProgressResponse {}));
         }
         crate::reaction::maybe_send_start(
