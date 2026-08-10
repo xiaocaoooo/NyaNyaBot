@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use nyanyabot_proto::{CommandMatch, Descriptor, StructuredError};
+use nyanyabot_proto::{CommandMatch, Descriptor, HandleResult, StructuredError};
 use serde_json::Value;
 use std::sync::Mutex;
 use tracing::{info, warn};
@@ -136,7 +136,7 @@ impl Plugin for LazyPlugin {
         event_raw: Value,
         match_data: Option<CommandMatch>,
         trace_id: &str,
-    ) -> Result<(), StructuredError> {
+    ) -> Result<HandleResult, StructuredError> {
         if self.is_sleeping() {
             warn!(plugin_id = %self.plugin_id, "handle while sleeping; caller should ensure_awake");
         }
@@ -177,7 +177,7 @@ impl Plugin for LazyPlugin {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use nyanyabot_proto::{CommandMatch, Descriptor, StructuredError};
+    use nyanyabot_proto::{CommandMatch, Descriptor, HandleResult, StructuredError};
     use serde_json::Value;
     use std::sync::Arc;
 
@@ -202,8 +202,8 @@ mod tests {
             _: Value,
             _: Option<CommandMatch>,
             _: &str,
-        ) -> Result<(), StructuredError> {
-            Ok(())
+        ) -> Result<HandleResult, StructuredError> {
+            Ok(HandleResult::default())
         }
         async fn status(&self) -> Result<String, StructuredError> {
             Ok("Running".into())

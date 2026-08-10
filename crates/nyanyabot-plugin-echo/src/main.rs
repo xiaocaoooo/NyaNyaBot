@@ -109,7 +109,7 @@ impl Plugin for EchoPlugin {
         match listener_id {
             "cmd.echo" => self.handle_echo(event_raw, match_data, trace_id).await,
             "cmd.echo.cfg" => self.handle_echo_cfg(event_raw, match_data, trace_id).await,
-            _ => Ok(HandleResult {}),
+            _ => Ok(HandleResult::default()),
         }
     }
 
@@ -154,14 +154,15 @@ impl EchoPlugin {
             text = g.as_str().to_string();
         }
         if text.is_empty() {
-            return Ok(HandleResult {});
+            return Ok(HandleResult::ignored());
         }
         let prefix = self.config.read().prefix.clone();
         let reply = format!("{prefix}{text}");
         if let Some(mut host) = self.host.read().await.clone() {
+            let _ = host.report_command_effective(trace_id).await;
             send_message(&mut host, &event_raw, &reply, trace_id).await;
         }
-        Ok(HandleResult {})
+        Ok(HandleResult::handled())
     }
 
     async fn handle_echo_cfg(
@@ -176,8 +177,9 @@ impl EchoPlugin {
             .map(|s| s == "pretty")
             .unwrap_or(false);
         let Some(mut host) = self.host.read().await.clone() else {
-            return Ok(HandleResult {});
+            return Ok(HandleResult::ignored());
         };
+        let _ = host.report_command_effective(trace_id).await;
         match host
             .call_dependency(
                 "external.configdump",
@@ -210,7 +212,7 @@ impl EchoPlugin {
                 .await;
             }
         }
-        Ok(HandleResult {})
+        Ok(HandleResult::handled())
     }
 }
 

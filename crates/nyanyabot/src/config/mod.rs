@@ -297,6 +297,35 @@ impl AccessControl {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommandReactionConfig {
+    /// Master switch for this command; default false.
+    #[serde(default)]
+    pub enabled: bool,
+    /// When master enabled, whether to send start emoji (default true).
+    #[serde(default = "default_true")]
+    pub start_enabled: bool,
+    /// When master enabled, whether to send end emoji (default true).
+    #[serde(default = "default_true")]
+    pub end_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub start_emoji_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub end_emoji_id: String,
+}
+
+impl Default for CommandReactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start_enabled: true,
+            end_enabled: true,
+            start_emoji_id: String::new(),
+            end_emoji_id: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PluginControl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,6 +355,9 @@ pub struct PluginControl {
     pub sleep_timeout: Option<i32>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// Per-command message emoji reactions (NapCat set_msg_emoji_like). Default empty/off.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub command_reactions: HashMap<String, CommandReactionConfig>,
 }
 
 impl PluginControl {
@@ -342,6 +374,7 @@ impl PluginControl {
             && self.enable_sleep.is_none()
             && matches!(self.sleep_timeout, None | Some(0))
             && self.env.is_empty()
+            && self.command_reactions.is_empty()
     }
 }
 

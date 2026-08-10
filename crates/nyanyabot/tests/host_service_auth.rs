@@ -55,8 +55,8 @@ impl Plugin for DepPlugin {
         _: Value,
         _: Option<CommandMatch>,
         _: &str,
-    ) -> Result<(), StructuredError> {
-        Ok(())
+    ) -> Result<nyanyabot_proto::HandleResult, StructuredError> {
+        Ok(nyanyabot_proto::HandleResult::default())
     }
     async fn status(&self) -> Result<String, StructuredError> {
         Ok("OK".into())
@@ -93,8 +93,8 @@ impl Plugin for CallerPlugin {
         _: Value,
         _: Option<CommandMatch>,
         _: &str,
-    ) -> Result<(), StructuredError> {
-        Ok(())
+    ) -> Result<nyanyabot_proto::HandleResult, StructuredError> {
+        Ok(nyanyabot_proto::HandleResult::default())
     }
     async fn status(&self) -> Result<String, StructuredError> {
         Ok("OK".into())
@@ -158,6 +158,7 @@ async fn host_service_token_and_dependency() {
         }),
         plugin_sent: Arc::new(std::sync::RwLock::new(Default::default())),
         ensure_awake: Arc::new(std::sync::RwLock::new(None)),
+        command_reactions: nyanyabot::reaction::CommandReactionTracker::new(),
     };
     state.bind_token("test.caller", "caller-token");
     state.bind_token("test.dep", "dep-token");

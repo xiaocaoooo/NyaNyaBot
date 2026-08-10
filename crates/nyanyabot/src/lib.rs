@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod onebot;
 pub mod plugin;
 pub mod pluginhost;
+pub mod reaction;
 pub mod stats;
 pub mod triggerlog;
 pub mod util;

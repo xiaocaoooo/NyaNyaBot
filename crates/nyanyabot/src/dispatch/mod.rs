@@ -244,6 +244,7 @@ impl Dispatcher {
                 let trace_id = self.host.generate_trace_id();
                 let real_seq = get_real_seq_string(&raw);
                 let message_id = parse_i64_loose(&real_seq);
+                let self_id = get_i64(&raw, "self_id");
                 self.host.begin_trace(
                     &trace_id,
                     pid,
@@ -252,7 +253,7 @@ impl Dispatcher {
                     json!({
                         "group_id": group_id,
                         "user_id": user_id,
-                        "self_id": get_i64(&raw, "self_id"),
+                        "self_id": self_id,
                         "raw_message": raw_message,
                         "seq": real_seq,
                         "message_id": message_id,
@@ -262,6 +263,18 @@ impl Dispatcher {
                         "match_full": match_data.full.clone(),
                         "match_groups": match_data.groups.clone(),
                     }),
+                );
+                // Register emoji-reaction context (no-op unless command_reactions enabled).
+                self.host.command_reactions().begin(
+                    &trace_id,
+                    crate::reaction::CommandReactionContext {
+                        plugin_id: pid.clone(),
+                        listener_id: l.id.clone(),
+                        self_id,
+                        message_id: crate::reaction::extract_message_id(&raw),
+                        effective: false,
+                        start_sent: false,
+                    },
                 );
                 info!(plugin_id = %pid, command_id = %l.id, "command matched");
                 // ensure_awake may restart and re-register a fresh Arc; never reuse the
@@ -276,13 +289,22 @@ impl Dispatcher {
                         Err(nyanyabot_proto::StructuredError::internal(err.to_string()))
                     }
                 };
-                let (ok, err_msg) = match &handle_res {
-                    Ok(_) => (true, String::new()),
+                let (ok, err_msg, handled_flag) = match &handle_res {
+                    Ok(res) => (true, String::new(), res.handled),
                     Err(err) => {
                         warn!(plugin_id = %pid, error = %err, "command handle failed");
-                        (false, err.to_string())
+                        (false, err.to_string(), false)
                     }
                 };
+                // Host-side end detection for command reactions.
+                crate::reaction::finish_reactions(
+                    &self.host.call_onebot_fn(),
+                    &self.host.store(),
+                    self.host.command_reactions(),
+                    &trace_id,
+                    handled_flag,
+                )
+                .await;
                 self.host.end_trace(&trace_id, ok, err_msg);
             }
         }

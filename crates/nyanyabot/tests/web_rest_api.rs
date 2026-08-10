@@ -127,8 +127,8 @@ impl Plugin for DemoPlugin {
         _: Value,
         _: Option<nyanyabot_proto::CommandMatch>,
         _: &str,
-    ) -> Result<(), StructuredError> {
-        Ok(())
+    ) -> Result<nyanyabot_proto::HandleResult, StructuredError> {
+        Ok(nyanyabot_proto::HandleResult::default())
     }
     async fn status(&self) -> Result<String, StructuredError> {
         Ok("Running".into())

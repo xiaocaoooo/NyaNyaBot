@@ -103,7 +103,7 @@ impl Plugin for CronTimePlugin {
             "cron.send_time" => {
                 let gid = self.config.read().group_id;
                 if gid == 0 {
-                    return Ok(HandleResult {});
+                    return Ok(HandleResult::default());
                 }
                 let now = chrono::Local::now();
                 let message = format!(
@@ -124,7 +124,7 @@ impl Plugin for CronTimePlugin {
             }
             _ => {}
         }
-        Ok(HandleResult {})
+        Ok(HandleResult::default())
     }
 
     async fn status(&self) -> Result<String, StructuredError> {

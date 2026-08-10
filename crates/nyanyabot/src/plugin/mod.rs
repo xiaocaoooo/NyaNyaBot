@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use nyanyabot_proto::{CommandMatch, Descriptor, StructuredError};
+use nyanyabot_proto::{CommandMatch, Descriptor, HandleResult, StructuredError};
 use serde_json::Value;
 use tokio::sync::RwLock;
 
@@ -24,7 +24,7 @@ pub trait Plugin: Send + Sync {
         event_raw: Value,
         match_data: Option<CommandMatch>,
         trace_id: &str,
-    ) -> Result<(), StructuredError>;
+    ) -> Result<HandleResult, StructuredError>;
     async fn status(&self) -> Result<String, StructuredError>;
     async fn shutdown(&self) -> Result<(), StructuredError>;
 }
@@ -135,8 +135,8 @@ mod tests {
             _: Value,
             _: Option<CommandMatch>,
             _: &str,
-        ) -> Result<(), StructuredError> {
-            Ok(())
+        ) -> Result<HandleResult, StructuredError> {
+            Ok(HandleResult::default())
         }
         async fn status(&self) -> Result<String, StructuredError> {
             Ok("OK".into())

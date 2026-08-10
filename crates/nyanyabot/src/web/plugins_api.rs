@@ -30,6 +30,7 @@ pub struct PluginStateView {
     pub event_access: Map<String, Value>,
     pub command_overrides: Map<String, Value>,
     pub env: Map<String, Value>,
+    pub command_reactions: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +60,7 @@ struct PluginSwitchPatch {
     event_access: Option<HashMap<String, AccessControl>>,
     command_overrides: Option<HashMap<String, Vec<OverrideRule>>>,
     env: Option<HashMap<String, String>>,
+    command_reactions: Option<HashMap<String, crate::config::CommandReactionConfig>>,
 }
 
 fn bool_map_to_value_map(m: &HashMap<String, bool>) -> Map<String, Value> {
@@ -122,6 +124,7 @@ pub async fn build_plugin_state(
     let mut event_access = HashMap::new();
     let mut command_overrides = HashMap::new();
     let mut env_map = HashMap::new();
+    let mut command_reactions = HashMap::new();
 
     if let Some(control) = control {
         command_prefix = control.command_prefix.clone();
@@ -130,6 +133,7 @@ pub async fn build_plugin_state(
         event_access = control.event_access.clone();
         command_overrides = control.command_overrides.clone();
         env_map = control.env.clone();
+        command_reactions = control.command_reactions.clone();
         enable_sleep = control.enable_sleep.unwrap_or(true);
         if let Some(st) = control.sleep_timeout
             && st > 0
@@ -161,6 +165,10 @@ pub async fn build_plugin_state(
         event_access: access_map_to_value_map(&event_access),
         command_overrides: overrides_map_to_value_map(&command_overrides),
         env: string_map_to_value_map(&env_map),
+        command_reactions: command_reactions
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(Value::Null)))
+            .collect(),
     }
 }
 
@@ -278,6 +286,9 @@ fn apply_plugin_switch_patch(
     }
     if let Some(env) = patch.env {
         control.env = env;
+    }
+    if let Some(command_reactions) = patch.command_reactions {
+        control.command_reactions = command_reactions;
     }
     control
 }

@@ -7,7 +7,7 @@ use nyanyabot_proto::StructuredError;
 use nyanyabot_proto::pb::host_service_server::HostService;
 use nyanyabot_proto::pb::{
     CallDependencyRequest, CallDependencyResponse, CallOneBotRequest, CallOneBotResponse,
-    GetStatsRequest, GetStatsResponse,
+    GetStatsRequest, GetStatsResponse, ReportCommandProgressRequest, ReportCommandProgressResponse,
 };
 use serde_json::Value;
 use std::sync::RwLock;
@@ -49,6 +49,7 @@ pub struct SharedHostState {
     pub call_onebot: CallOneBotFn,
     pub plugin_sent: Arc<RwLock<HashMap<String, AtomicI64>>>,
     pub ensure_awake: Arc<RwLock<Option<EnsureAwakeFn>>>,
+    pub command_reactions: crate::reaction::CommandReactionTracker,
 }
 
 impl SharedHostState {
@@ -269,6 +270,42 @@ impl HostService for HostServiceImpl {
             start_time: snap.start_time.to_rfc3339(),
             uptime: snap.uptime,
         }))
+    }
+
+    async fn report_command_progress(
+        &self,
+        request: Request<ReportCommandProgressRequest>,
+    ) -> Result<Response<ReportCommandProgressResponse>, Status> {
+        let token = nyanyabot_proto::extract_token(&request)
+            .ok_or_else(|| Status::unauthenticated("missing plugin token"))?;
+        let _caller = self
+            .state
+            .plugin_id_for_token(&token)
+            .ok_or_else(|| Status::unauthenticated("unknown plugin token"))?;
+        let args = request.into_inner();
+        let trace_id = args.trace_id.trim();
+        if trace_id.is_empty() {
+            return Err(Status::invalid_argument("trace_id is required"));
+        }
+        let stage = args.stage.trim().to_ascii_lowercase();
+        if stage != "effective" {
+            return Err(Status::invalid_argument(format!(
+                "unsupported stage: {}",
+                args.stage
+            )));
+        }
+        if !self.state.command_reactions.mark_effective(trace_id) {
+            // Unknown trace: ignore softly (plugin may race after host cleaned up).
+            return Ok(Response::new(ReportCommandProgressResponse {}));
+        }
+        crate::reaction::maybe_send_start(
+            &self.state.call_onebot,
+            &self.state.store,
+            &self.state.command_reactions,
+            trace_id,
+        )
+        .await;
+        Ok(Response::new(ReportCommandProgressResponse {}))
     }
 }
 

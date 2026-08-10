@@ -91,6 +91,7 @@ impl PluginHost {
             call_onebot,
             plugin_sent: Arc::new(RwLock::new(HashMap::new())),
             ensure_awake: Arc::new(RwLock::new(None)),
+            command_reactions: crate::reaction::CommandReactionTracker::new(),
         };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -162,6 +163,18 @@ impl PluginHost {
 
     pub fn host_addr(&self) -> String {
         self.host_addr.read().unwrap().clone()
+    }
+
+    pub fn command_reactions(&self) -> &crate::reaction::CommandReactionTracker {
+        &self.host_state.command_reactions
+    }
+
+    pub fn call_onebot_fn(&self) -> super::host_service::CallOneBotFn {
+        self.host_state.call_onebot.clone()
+    }
+
+    pub fn store(&self) -> Arc<Store> {
+        self.store.clone()
     }
 
     pub fn generate_trace_id(&self) -> String {
@@ -900,7 +913,7 @@ impl Plugin for RpcPlugin {
         event_raw: Value,
         match_data: Option<CommandMatch>,
         trace_id: &str,
-    ) -> Result<(), StructuredError> {
+    ) -> Result<nyanyabot_proto::HandleResult, StructuredError> {
         let event_raw_json = serde_json::to_vec(&event_raw)
             .map_err(|e| StructuredError::invalid_params(e.to_string()))?;
         let match_field = match_data.map(|m| nyanyabot_proto::pb::CommandMatch {
@@ -908,7 +921,7 @@ impl Plugin for RpcPlugin {
             groups: m.groups,
         });
         let mut client = self.client.lock().await;
-        client
+        let resp = client
             .handle(Request::new(HandleRequest {
                 listener_id: listener_id.to_string(),
                 event_raw_json,
@@ -916,8 +929,13 @@ impl Plugin for RpcPlugin {
                 trace_id: trace_id.to_string(),
             }))
             .await
-            .map_err(|e| StructuredError::internal(e.to_string()))?;
-        Ok(())
+            .map_err(|e| StructuredError::internal(e.to_string()))?
+            .into_inner();
+        if resp.result_json.is_empty() {
+            return Ok(nyanyabot_proto::HandleResult::default());
+        }
+        serde_json::from_slice(&resp.result_json)
+            .map_err(|e| StructuredError::internal(format!("invalid handle result json: {e}")))
     }
 
     async fn status(&self) -> Result<String, StructuredError> {

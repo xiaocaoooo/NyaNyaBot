@@ -59,22 +59,23 @@ impl Plugin for StatusPlugin {
         trace_id: &str,
     ) -> Result<HandleResult, StructuredError> {
         if listener_id != "cmd.status" {
-            return Ok(HandleResult {});
+            return Ok(HandleResult::default());
         }
         let host = {
             let guard = self.host.read().await;
             guard.clone()
         };
         let Some(mut host) = host else {
-            return Ok(HandleResult {});
+            return Ok(HandleResult::default());
         };
+        let _ = host.report_command_effective(trace_id).await;
         let stats = host.get_stats().await?;
         let reply = format!(
             "NyaNyaBot\n收/发: {}/{}\n运行时间: {}",
             stats.recv_count, stats.sent_count, stats.uptime
         );
         send_message(&mut host, &event_raw, &reply, trace_id).await;
-        Ok(HandleResult {})
+        Ok(HandleResult::handled())
     }
 
     async fn status(&self) -> Result<String, StructuredError> {

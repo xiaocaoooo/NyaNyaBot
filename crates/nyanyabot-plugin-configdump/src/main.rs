@@ -110,7 +110,7 @@ impl Plugin for ConfigDumpPlugin {
         trace_id: &str,
     ) -> Result<HandleResult, StructuredError> {
         if listener_id != "cmd.cfg" {
-            return Ok(HandleResult {});
+            return Ok(HandleResult::ignored());
         }
         let pretty = match_data
             .as_ref()
@@ -127,6 +127,7 @@ impl Plugin for ConfigDumpPlugin {
             format!("{}{}", st.prefix, body)
         };
         if let Some(mut host) = self.host.read().await.clone() {
+            let _ = host.report_command_effective(trace_id).await;
             let msg_type = event_raw
                 .get("message_type")
                 .and_then(|v| v.as_str())
@@ -157,7 +158,7 @@ impl Plugin for ConfigDumpPlugin {
                     .await;
             }
         }
-        Ok(HandleResult {})
+        Ok(HandleResult::handled())
     }
 
     async fn status(&self) -> Result<String, StructuredError> {
