@@ -45,8 +45,8 @@ npm run build
 当前仓库中的 Go 服务已改为直接托管 Next.js 静态导出文件：
 
 - 托管目录：`internal/web/frontend`
-- 嵌入入口：`internal/web/frontend_assets.go`
-- 服务逻辑：`internal/web/server.go`（API + 静态文件）
+- 嵌入入口：`crates/nyanyabot/src/web (rust-embed)`
+- 服务逻辑：`crates/nyanyabot/src/web/mod.rs`（API + 静态文件）
 
 同步导出到 Go 目录：
 

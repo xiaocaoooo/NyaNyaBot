@@ -27,7 +27,7 @@ export function OverridePanel({ selectedPlugin, target, saving, onSave }: Overri
     if (selectedPlugin) {
       setOverrides(selectedPlugin.state.command_overrides ?? {});
     }
-  }, [selectedPlugin?.plugin_id]);
+  }, [selectedPlugin]);
 
   React.useEffect(() => {
     const runTest = async () => {

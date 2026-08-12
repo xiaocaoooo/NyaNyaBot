@@ -1,0 +1,72 @@
+{
+  "name": "ConfigDump",
+  "plugin_id": "external.configdump",
+  "version": "0.1.0",
+  "author": "nyanyabot",
+  "description": "Test plugin: reply with the current runtime config (hot updated via Configure)",
+  "dependencies": [],
+  "exports": [
+    {
+      "name": "configdump.snapshot",
+      "description": "返回当前生效配置快照（供其他插件调用）",
+      "params_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "pretty": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "result_schema": {
+        "additionalProperties": true,
+        "properties": {
+          "caller_plugin_id": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object"
+          },
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "caller_plugin_id",
+          "prefix",
+          "config"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "config": {
+    "version": "1",
+    "description": "ConfigDump plugin config",
+    "schema": {
+      "additionalProperties": true,
+      "properties": {
+        "prefix": {
+          "description": "回复前缀（用于验证热更新是否生效）",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "default": {
+      "prefix": "CFG: "
+    }
+  },
+  "commands": [
+    {
+      "name": "cfg",
+      "id": "cmd.cfg",
+      "description": "输入 /cfg 或 /cfg pretty，返回插件当前配置（用于测试热更新）",
+      "pattern": "^/?cfg(?:\\s+(pretty))?$",
+      "match_raw": false,
+      "handler": "HandleCfg"
+    }
+  ],
+  "events": [],
+  "crons": []
+}

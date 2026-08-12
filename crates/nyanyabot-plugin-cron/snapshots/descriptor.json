@@ -1,0 +1,49 @@
+{
+  "name": "CronTime",
+  "plugin_id": "external.cron_time",
+  "version": "0.1.0",
+  "author": "nyanyabot",
+  "description": "每分钟在特定群聊发送当前时间的测试插件",
+  "dependencies": [],
+  "exports": [],
+  "config": {
+    "version": "1",
+    "description": "CronTime plugin config",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "description": "要发送时间的群聊ID",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "group_id"
+      ],
+      "type": "object"
+    },
+    "default": {
+      "group_id": 0
+    }
+  },
+  "commands": [
+    {
+      "name": "set_group",
+      "id": "cmd.set_group",
+      "description": "设置发送时间的群号：/set_group 123456",
+      "pattern": "^/?set_group\\s+(\\d+)$",
+      "match_raw": false,
+      "handler": "HandleSetGroup"
+    }
+  ],
+  "events": [],
+  "crons": [
+    {
+      "name": "send_time",
+      "id": "cron.send_time",
+      "description": "每分钟发送当前时间",
+      "schedule": "0 * * * * *",
+      "handler": "HandleCronTime"
+    }
+  ]
+}

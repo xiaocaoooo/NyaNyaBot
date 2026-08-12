@@ -18,7 +18,6 @@ go.work.sum
 
 # === Go 插件 ===
 # 编译后的插件二进制
-plugins/
 
 # === WebUI (Next.js) ===
 webui/node_modules/
@@ -59,5 +58,14 @@ logs/
 *.cache
 /tmp/
 
-internal/web/frontend/
 apidocs/
+
+/target/
+/plugins/
+/bin/
+/data/
+*.exe
+/nyanyabot
+
+# === Rust embed (build.rs) ===
+crates/nyanyabot/generated/

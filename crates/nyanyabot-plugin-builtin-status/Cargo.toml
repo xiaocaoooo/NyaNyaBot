@@ -1,0 +1,18 @@
+[package]
+name = "nyanyabot-plugin-builtin-status"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nyanyabot-plugin-builtin-status"
+path = "src/main.rs"
+
+[dependencies]
+nyanyabot-proto = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

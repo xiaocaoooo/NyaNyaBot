@@ -1,57 +1,90 @@
-# Frontend build stage
-FROM node:22-alpine AS frontend-builder
+# syntax=docker/dockerfile:1.7
+# Build from monorepo parent (BuildKit required):
+#   docker build -f NyaNyaBot/Dockerfile -t nyanyabot .
+#
+# Frontend is built inside the image (pnpm). Build needs network for
+# npm registry and Google Fonts (next/font/google).
+# Rust deps use cargo-chef layering + BuildKit cache mounts.
+# crates/nyanyabot/build.rs embeds webui/out (or frontend-placeholder).
 
-WORKDIR /app/webui
+FROM node:22-bookworm AS frontend-builder
+WORKDIR /webui
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+COPY NyaNyaBot/webui/package.json NyaNyaBot/webui/pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=nyanyabot-pnpm-store,sharing=locked \
+    pnpm install --frozen-lockfile
+COPY NyaNyaBot/webui/ ./
+RUN --mount=type=cache,target=/webui/.next/cache,id=nyanyabot-next-cache,sharing=locked \
+    pnpm build \
+ && test -f out/index.html \
+ && test -f out/plugins/index.html
 
-RUN corepack enable
+FROM rust:1.97-bookworm AS chef
+WORKDIR /src
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyanyabot-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=nyanyabot-cargo-git,sharing=locked \
+    cargo install cargo-chef --locked --version 0.1.72
 
-# Copy lockfiles and install dependencies
-COPY webui/package.json webui/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --ignore-scripts
+FROM chef AS planner
+COPY nyanyabot-proto /src/nyanyabot-proto
+COPY NyaNyaBot /src/NyaNyaBot
+WORKDIR /src/NyaNyaBot
+RUN cargo chef prepare --recipe-path /recipe.json
 
-# Copy full webui source and build
-COPY webui/ ./
-RUN pnpm run build
+FROM chef AS builder
+WORKDIR /src
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates
 
-COPY webui/ ./
+# Path dep must exist during cook (workspace path = ../nyanyabot-proto).
+COPY nyanyabot-proto /src/nyanyabot-proto
+COPY --from=planner /recipe.json /src/NyaNyaBot/recipe.json
+WORKDIR /src/NyaNyaBot
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyanyabot-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=nyanyabot-cargo-git,sharing=locked \
+    --mount=type=cache,target=/src/NyaNyaBot/target,id=nyanyabot-cargo-target,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json \
+      -p nyanyabot \
+      -p nyanyabot-plugin-builtin-status \
+      -p nyanyabot-plugin-echo
 
-RUN npm run build
+COPY NyaNyaBot /src/NyaNyaBot
+COPY --from=frontend-builder /webui/out /src/NyaNyaBot/webui/out
+# build.rs copies webui/out -> crates/nyanyabot/generated/frontend (source tree, not
+# target/). With a persistent target cache mount, Cargo may skip build.rs when its
+# inputs look unchanged, leaving generated/ missing in a fresh container layer.
+# Touch build.rs so rust-embed always sees the folder.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyanyabot-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=nyanyabot-cargo-git,sharing=locked \
+    --mount=type=cache,target=/src/NyaNyaBot/target,id=nyanyabot-cargo-target,sharing=locked \
+    test -f webui/out/index.html \
+ && test -f webui/out/plugins/index.html \
+ && touch crates/nyanyabot/build.rs \
+ && cargo build --release \
+      -p nyanyabot \
+      -p nyanyabot-plugin-builtin-status \
+      -p nyanyabot-plugin-echo \
+ && mkdir -p /out/plugins \
+ && cp target/release/nyanyabot /out/nyanyabot \
+ && cp target/release/nyanyabot-plugin-builtin-status /out/plugins/ \
+ && cp target/release/nyanyabot-plugin-echo /out/plugins/
 
-FROM golang:1.25-alpine AS builder
-
-RUN apk add --no-cache git ca-certificates tzdata
-
+FROM debian:bookworm-slim
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && groupadd -g 10001 appgroup \
+ && useradd -u 10001 -g appgroup -m -d /app -s /usr/sbin/nologin appuser
 WORKDIR /app
-
-COPY go.mod go.sum ./
-RUN go mod download && go mod verify
-
-COPY . .
-
-COPY --from=frontend-builder /app/webui/out /app/internal/web/frontend
-
-# Build the main application
-RUN cd cmd/nyanyabot && go build -o /app/bin/nyanyabot .
-
-# Runtime stage
-FROM alpine:latest
-
-# Install ca-certificates for timezone data and HTTPS requests
-RUN apk add --no-cache ca-certificates tzdata
-
-# Create dedicated non-root group and user with fixed IDs for best security engineering practices
-RUN addgroup -g 10001 -S appgroup && \
-    adduser -u 10001 -S -G appgroup -h /app -s /sbin/nologin appuser
-
-WORKDIR /app
-COPY --from=builder /app/bin/nyanyabot .
-
-# Create necessary directories for data and plugins, and assign ownership
-RUN mkdir -p /app/data /app/plugins && \
-    chown -R appuser:appgroup /app
-
+COPY --from=builder /out/nyanyabot /app/nyanyabot
+COPY --from=builder /out/plugins /app/plugins
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 USER appuser:appgroup
-
-# Expose WebUI and OneBot Reverse WS ports
 EXPOSE 3000 3001
 ENTRYPOINT ["./nyanyabot"]

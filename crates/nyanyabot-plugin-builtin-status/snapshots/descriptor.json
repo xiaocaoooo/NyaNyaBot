@@ -1,0 +1,21 @@
+{
+  "name": "Builtin Status",
+  "plugin_id": "builtin.status",
+  "version": "0.1.0",
+  "author": "nyanyabot",
+  "description": "显示 NyaNyaBot 运行状态",
+  "dependencies": [],
+  "exports": [],
+  "commands": [
+    {
+      "name": "status",
+      "id": "cmd.status",
+      "description": "显示机器人状态（收发消息数、运行时间）",
+      "pattern": "(?i)^nyanya(bot)?$",
+      "match_raw": false,
+      "handler": "HandleStatus"
+    }
+  ],
+  "events": [],
+  "crons": []
+}
